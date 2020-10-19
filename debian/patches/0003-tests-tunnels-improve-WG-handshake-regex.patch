@@ -1,0 +1,21 @@
+From: =?utf-8?q?Lukas_M=C3=A4rdian?= <lukas.maerdian@canonical.com>
+Date: Thu, 8 Oct 2020 16:30:28 +0200
+Subject: tests:tunnels: improve WG handshake regex
+
+---
+ tests/integration/tunnels.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/integration/tunnels.py b/tests/integration/tunnels.py
+index dbbe078..9299aa3 100644
+--- a/tests/integration/tunnels.py
++++ b/tests/integration/tunnels.py
+@@ -137,7 +137,7 @@ class _CommonTests():
+         self.assertIn("endpoint: 10.10.10.20:51820", out)
+         self.assertIn("allowed ips: 0.0.0.0/0", out)
+         self.assertIn("persistent keepalive: every 21 seconds", out)
+-        self.assertRegex(out, r'latest handshake: \d+ seconds? ago')
++        self.assertRegex(out, r'latest handshake: (\d+ seconds? ago|Now)')
+         self.assertRegex(out, r'transfer: \d+ B received, \d+ B sent')
+         self.assert_iface('wg1', ['inet 20.20.20.10/24'])
+ 

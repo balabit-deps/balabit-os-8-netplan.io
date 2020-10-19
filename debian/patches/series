@@ -1,0 +1,5 @@
+0001-Implement-just-in-time-behaviour-for-generate-162.patch
+0002-Disable-some-tests-due-to-ovs-vsctl-missing-on-riscv.patch
+0003-tests-tunnels-improve-WG-handshake-regex.patch
+0004-tests-ovs-fix-OVS-timeouts.patch
+0005-Fix-MAAS-OVS-first-boot-for-single-NIC-PXE-systems-1.patch

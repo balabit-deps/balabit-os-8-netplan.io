@@ -1,0 +1,296 @@
+From: Dimitri John Ledkov <19779+xnox@users.noreply.github.com>
+Date: Wed, 9 Sep 2020 12:21:06 +0100
+Subject: Implement just-in-time behaviour for generate (#162)
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+If system is initializing (basic.target not reached yet), and netplan generate is called ensure that any netplan generated service units are added to the initial boot transaction.
+
+This should resolve cloud-init first-time booting with systemd-networkd disabled, or with requirement to add wlan/wifi units.
+
+Commits:
+* generate: implement just-in-time behaviour of generate
+
+If system is initializing (basic.target not reached yet), and `netplan
+generate` is called ensure that any netplan generated service units
+are added to the initial boot transaction.
+
+This should resolve cloud-init first-time booting with
+systemd-networkd disabled, or with requirement to add wlan/wifi units.
+
+* Add integration tests for cloud-init OVS/WPA first-boot
+
+* generate: coverage 100%, by excluding special parts, covered by the integration test
+
+* generate: jit starting of units only as root
+
+Units shall only be started JIT during early boot, by the system user
+(root). If a normal user calls 'netplan generate' it shall not start the
+units. Avoid asking for a password if a user (or test) executes this
+command and rather fail with missing authentication.
+
+* Add documentation and feature flag
+
+* generate: no jit if network.target already started
+
+Do not try to enqueue new network related netplan-*.service units, if
+network.target was already started.
+
+Co-authored-by: Lukas Märdian <lukas.maerdian@canonical.com>
+---
+ doc/netplan-generate.md         |   5 ++
+ src/generate.c                  |  59 +++++++++++++++++++++-
+ tests/integration/base.py       |  12 ++++-
+ tests/integration/cloud-init.py | 106 ++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 179 insertions(+), 3 deletions(-)
+ create mode 100644 tests/integration/cloud-init.py
+
+diff --git a/doc/netplan-generate.md b/doc/netplan-generate.md
+index b325169..5ba5ee1 100644
+--- a/doc/netplan-generate.md
++++ b/doc/netplan-generate.md
+@@ -25,6 +25,11 @@ configuration.
+ You will not normally need to run this directly as it is run by
+ **netplan apply**, **netplan try**, or at boot.
+ 
++Only if executed during the systemd ``initializing`` phase
++(i.e. "Early bootup, before ``basic.target`` is reached"), will
++it attempt to start/apply the newly created service units.
++**Requires feature: generate-just-in-time**
++
+ For details of the configuration file format, see **netplan**(5).
+ 
+ # OPTIONS
+diff --git a/src/generate.c b/src/generate.c
+index e88dd7f..50de4dc 100644
+--- a/src/generate.c
++++ b/src/generate.c
+@@ -53,6 +53,34 @@ reload_udevd(void)
+     g_spawn_sync(NULL, (gchar**)argv, NULL, G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+ };
+ 
++// LCOV_EXCL_START
++/* covered via 'cloud-init' integration test */
++static gboolean
++check_called_just_in_time()
++{
++    const gchar *argv[] = { "/bin/systemctl", "is-system-running", NULL };
++    gchar *output = NULL;
++    g_spawn_sync(NULL, (gchar**)argv, NULL, G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL, &output, NULL, NULL, NULL);
++    if (output != NULL && strstr(output, "initializing") != NULL) {
++        g_free(output);
++        const gchar *argv2[] = { "/bin/systemctl", "is-active", "network.target", NULL };
++        gint exit_code = 0;
++        g_spawn_sync(NULL, (gchar**)argv2, NULL, G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL, NULL, NULL, &exit_code, NULL);
++        /* return TRUE, if network.target is not yet active */
++        return !g_spawn_check_exit_status(exit_code, NULL);
++    }
++    g_free(output);
++    return FALSE;
++};
++
++static void
++start_unit_jit(gchar *unit)
++{
++    const gchar *argv[] = { "/bin/systemctl", "start", "--no-block", "--no-ask-password", unit, NULL };
++    g_spawn_sync(NULL, (gchar**)argv, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL, NULL, NULL, NULL);
++};
++// LCOV_EXCL_END
++
+ static void
+ nd_iterator_list(gpointer value, gpointer user_data)
+ {
+@@ -162,6 +190,8 @@ int main(int argc, char** argv)
+     /* are we being called as systemd generator? */
+     gboolean called_as_generator = (strstr(argv[0], "systemd/system-generators/") != NULL);
+     g_autofree char* generator_run_stamp = NULL;
++    glob_t gl;
++    int rc;
+ 
+     /* Parse CLI options */
+     opt_context = g_option_context_new(NULL);
+@@ -206,8 +236,6 @@ int main(int argc, char** argv)
+         g_autofree char* glob_etc = g_strjoin(NULL, rootdir ?: "", G_DIR_SEPARATOR_S, "etc/netplan/*.yaml", NULL);
+         g_autofree char* glob_run = g_strjoin(NULL, rootdir ?: "", G_DIR_SEPARATOR_S, "run/netplan/*.yaml", NULL);
+         g_autofree char* glob_lib = g_strjoin(NULL, rootdir ?: "", G_DIR_SEPARATOR_S, "lib/netplan/*.yaml", NULL);
+-        glob_t gl;
+-        int rc;
+         /* keys are strdup()ed, free them; values point into the glob_t, don't free them */
+         g_autoptr(GHashTable) configs = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+         g_autoptr(GList) config_keys = NULL;
+@@ -292,6 +320,33 @@ int main(int argc, char** argv)
+         FILE* f = fopen(generator_run_stamp, "w");
+         g_assert(f != NULL);
+         fclose(f);
++    } else if (check_called_just_in_time()) {
++        /* netplan-feature: generate-just-in-time */
++        /* When booting with cloud-init, network configuration
++         * might be provided just-in-time. Specifically after
++         * system-generators were executed, but before
++         * network.target is started. In such case, auxiliary
++         * units that netplan enables have not been included in
++         * the initial boot transaction. Detect such scenario and
++         * add all netplan units to the initial boot transaction.
++         */
++        // LCOV_EXCL_START
++        /* covered via 'cloud-init' integration test */
++        if (any_networkd) {
++            start_unit_jit("systemd-networkd.socket");
++            start_unit_jit("systemd-networkd-wait-online.service");
++            start_unit_jit("systemd-networkd.service");
++        }
++        g_autofree char* glob_run = g_strjoin(NULL, rootdir ?: "", G_DIR_SEPARATOR_S,
++                                              "run/systemd/system/netplan-*.service", NULL);
++        if (!glob(glob_run, 0, NULL, &gl)) {
++            for (size_t i = 0; i < gl.gl_pathc; ++i) {
++                gchar *unit_name = g_path_get_basename(gl.gl_pathv[i]);
++                start_unit_jit(unit_name);
++                g_free(unit_name);
++            }
++        }
++        // LCOV_EXCL_END
+     }
+ 
+     return 0;
+diff --git a/tests/integration/base.py b/tests/integration/base.py
+index 4bba1e0..b4cee8e 100644
+--- a/tests/integration/base.py
++++ b/tests/integration/base.py
+@@ -4,9 +4,10 @@
+ # Wifi (mac80211-hwsim). These need to be run in a VM and do change the system
+ # configuration.
+ #
+-# Copyright (C) 2018 Canonical, Ltd.
++# Copyright (C) 2018-2020 Canonical, Ltd.
+ # Author: Martin Pitt <martin.pitt@ubuntu.com>
+ # Author: Mathieu Trudel-Lapierre <mathieu.trudel-lapierre@canonical.com>
++# Author: Lukas Märdian <lukas.maerdian@canonical.com>
+ #
+ # This program is free software; you can redistribute it and/or modify
+ # it under the terms of the GNU General Public License as published by
+@@ -407,3 +408,12 @@ class IntegrationTestsBase(unittest.TestCase):
+         p = subprocess.Popen(['systemctl', 'is-active', unit], stdout=subprocess.PIPE)
+         out = p.communicate()[0]
+         return p.returncode == 0 or out.startswith(b'activating')
++
++
++class IntegrationTestReboot(IntegrationTestsBase):
++
++    def tearDown(self):
++        # Do not tearDown in the middle of a reboot test
++        # Only after the 2nd part of the test ran (after reboot)
++        if os.getenv('AUTOPKGTEST_REBOOT_MARK'):
++            super().tearDown()
+diff --git a/tests/integration/cloud-init.py b/tests/integration/cloud-init.py
+new file mode 100644
+index 0000000..4a9910c
+--- /dev/null
++++ b/tests/integration/cloud-init.py
+@@ -0,0 +1,106 @@
++#!/usr/bin/python3
++#
++# Integration tests for complex networking scenarios
++# (ie. mixes of various features, may test real live cases)
++#
++# These need to be run in a VM and do change the system
++# configuration.
++#
++# Copyright (C) 2020 Canonical, Ltd.
++# Author: Lukas Märdian <lukas.maerdian@canonical.com>
++#
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; version 3.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++import sys
++import os
++import time
++import subprocess
++import unittest
++
++from base import IntegrationTestReboot, test_backends
++
++
++@unittest.skipIf("networkd" not in test_backends,
++                     "skipping as networkd backend tests are disabled")
++class TestSpecialReboot(IntegrationTestReboot):
++    backend = 'networkd'
++
++    def test_generate_start_services_just_in_time(self):
++        self.setup_eth(None)
++        MARKER = 'cloud_init_generate'
++        # PART 1: set up the requried files before rebooting
++        if os.getenv('AUTOPKGTEST_REBOOT_MARK') != MARKER:
++            # any netplan YAML config
++            with open(self.config, 'w') as f:
++                f.write('''network:
++  ethernets:
++    ethbn:
++      match: {name: %(ec)s}
++      dhcp4: true''' % {'ec': self.dev_e_client})
++            # Prepare a dummy netplan service unit, which will be moved to /run/systemd/system/
++            # during early boot, as if it would have been created by 'netplan generate'
++            with open ('/netplan-dummy.service', 'w') as f:
++                f.write('''[Unit]
++Description=Check if this dummy is properly started by systemd
++
++[Service]
++Type=oneshot
++# Keep it running, so we can verify it was properly started
++RemainAfterExit=yes
++ExecStart=echo "Doing nothing ..."
++''')
++            # A service simulating cloud-init, calling 'netplan generate' during early boot
++            # at the 'initialization' phase of systemd (before basic.target is reached).
++            with open ('/etc/systemd/system/cloud-init-dummy.service', 'w') as f:
++                f.write('''[Unit]
++Description=Simulating cloud-init's 'netplan generate' call during early boot
++DefaultDependencies=no
++Before=basic.target
++After=sysinit.target
++
++[Install]
++WantedBy=multi-user.target
++
++[Service]
++Type=oneshot
++# Keep it running, so we can verify it was properly started
++RemainAfterExit=yes
++# Simulate creating a new service unit (i.e. netplan-wpa-*.service / netplan-ovs-*.service)
++ExecStart=/bin/mv /netplan-dummy.service /run/systemd/system/
++ExecStart=/usr/sbin/netplan generate
++''')
++            subprocess.check_call(['systemctl', '--quiet', 'enable', 'cloud-init-dummy.service'])
++            subprocess.check_call(['systemctl', '--quiet', 'disable', 'systemd-networkd.service'])
++            subprocess.check_call(['/tmp/autopkgtest-reboot', MARKER])
++        # PART 2: after reboot verify all (newly created) services have been started
++        else:
++            self.addCleanup(subprocess.call, ['rm', '/run/systemd/system/netplan-dummy.service'])
++            self.addCleanup(subprocess.call, ['rm', '/etc/systemd/system/cloud-init-dummy.service'])
++            self.addCleanup(subprocess.call, ['systemctl', '--quiet', 'disable', 'cloud-init-dummy.service'])
++            
++            time.sleep(5)  # Give some time for systemd to finish the boot transaction
++            # Verify our cloud-init simulation worked
++            out = subprocess.check_output(['systemctl', 'status', 'cloud-init-dummy.service'], universal_newlines=True)
++            self.assertIn('Active: active (exited)', out)
++            self.assertIn('mv /netplan-dummy.service /run/systemd/system/ (code=exited, status=0/SUCCESS)', out)
++            self.assertIn('netplan generate (code=exited, status=0/SUCCESS)', out)
++            # Verify the previously disabled networkd is running again
++            out = subprocess.check_output(['systemctl', 'status', 'systemd-networkd.service'], universal_newlines=True)
++            self.assertIn('Active: active (running)', out)
++            # Verify the newly created services were started just-in-time
++            out = subprocess.check_output(['systemctl', 'status', 'netplan-dummy.service'], universal_newlines=True)
++            self.assertIn('Active: active (exited)', out)
++            self.assertIn('echo Doing nothing ... (code=exited, status=0/SUCCESS)', out)
++
++
++unittest.main(testRunner=unittest.TextTestRunner(stream=sys.stdout, verbosity=2))
