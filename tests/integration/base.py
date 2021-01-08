@@ -4,9 +4,10 @@
 # Wifi (mac80211-hwsim). These need to be run in a VM and do change the system
 # configuration.
 #
-# Copyright (C) 2018 Canonical, Ltd.
+# Copyright (C) 2018-2020 Canonical, Ltd.
 # Author: Martin Pitt <martin.pitt@ubuntu.com>
 # Author: Mathieu Trudel-Lapierre <mathieu.trudel-lapierre@canonical.com>
+# Author: Lukas Märdian <lukas.maerdian@canonical.com>
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by

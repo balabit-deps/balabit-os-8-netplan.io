@@ -1,21 +1,21 @@
 From: =?utf-8?q?Lukas_M=C3=A4rdian?= <lukas.maerdian@canonical.com>
-Date: Thu, 8 Oct 2020 16:30:28 +0200
-Subject: tests:tunnels: improve WG handshake regex
+Date: Fri, 8 Jan 2021 09:28:23 +0100
+Subject: tests:tunnels: improve test reliability
 
 ---
  tests/integration/tunnels.py | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/tests/integration/tunnels.py b/tests/integration/tunnels.py
-index dbbe078..9299aa3 100644
+index 9299aa3..0bc6e58 100644
 --- a/tests/integration/tunnels.py
 +++ b/tests/integration/tunnels.py
-@@ -137,7 +137,7 @@ class _CommonTests():
-         self.assertIn("endpoint: 10.10.10.20:51820", out)
-         self.assertIn("allowed ips: 0.0.0.0/0", out)
-         self.assertIn("persistent keepalive: every 21 seconds", out)
+@@ -123,7 +123,7 @@ class _CommonTests():
+         self.assertIn("fwmark: 0x2a", out)
+         self.assertIn("peer: M9nt4YujIOmNrRmpIRTmYSfMdrpvE7u6WkG8FY8WjG4=", out)
+         self.assertIn("allowed ips: 20.20.20.0/24", out)
 -        self.assertRegex(out, r'latest handshake: \d+ seconds? ago')
 +        self.assertRegex(out, r'latest handshake: (\d+ seconds? ago|Now)')
          self.assertRegex(out, r'transfer: \d+ B received, \d+ B sent')
-         self.assert_iface('wg1', ['inet 20.20.20.10/24'])
- 
+         self.assert_iface('wg0', ['inet 10.10.10.20/24'])
+         # Verify client

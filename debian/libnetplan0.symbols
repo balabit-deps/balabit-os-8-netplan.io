@@ -3,6 +3,7 @@ libnetplan.so.0.0 libnetplan0 #MINVER#
  NETPLAN_WIFI_WOWLAN_TYPES@Base 0.99
  address_option_handlers@Base 0.100
  current_file@Base 0.99
+ find_yaml_glob@Base 0.101
  g_string_free_to_file@Base 0.99
  is_hostname@Base 0.100
  is_ip4_address@Base 0.99
@@ -12,6 +13,7 @@ libnetplan.so.0.0 libnetplan0 #MINVER#
  missing_ids_found@Base 0.99
  netdefs@Base 0.99
  netdefs_ordered@Base 0.99
+ netplan_clear_netdefs@Base 0.101
  netplan_finish_parse@Base 0.99
  netplan_get_global_backend@Base 0.99
  netplan_parse_yaml@Base 0.99

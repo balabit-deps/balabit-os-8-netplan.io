@@ -1,3 +1,50 @@
+netplan.io (0.101-0ubuntu3~20.04.2) focal; urgency=medium
+
+  * Backport netplan.io 0.101-0ubuntu3 to 20.04 (LP: #1908509)
+    - Includes DBus Config/Get/Set/Try API
+    - Includes fixes for NetworkManager integration
+    - Includes Documentation improvements
+    - Compatibility with systemd v247
+  * Improve test stability, by adding two patches from upstream:
+    - debian/patches/0004-tests-tunnels-improve-test-reliability.patch
+    - debian/patches/0005-tests-dbus-improve-test-stability-of-timeouts.patch
+
+ -- Lukas Märdian <lukas.maerdian@canonical.com>  Fri, 08 Jan 2021 15:17:07 +0100
+
+netplan.io (0.101-0ubuntu3) hirsute; urgency=medium
+
+  * Add d/p/0002-parse-fix-networkmanager-backend-options-for-modem-c.patch:
+    Allows parsing of networkmanager: backend handlers for modem devices
+
+ -- Lukas Märdian <lukas.maerdian@canonical.com>  Thu, 17 Dec 2020 10:49:43 +0100
+
+netplan.io (0.101-0ubuntu2) hirsute; urgency=medium
+
+  * d/p/0001-Fix-changing-of-macaddress-with-systemd-v247-178.patch:
+    Fix MAC address changes with systemd v247 by using a new approach inside
+    systemd's .network file. It also works with older version of systemd.
+
+ -- Lukas Märdian <lukas.maerdian@canonical.com>  Wed, 16 Dec 2020 13:43:51 +0100
+
+netplan.io (0.101-0ubuntu1) hirsute; urgency=medium
+
+  * New upstream release: 0.101
+    - Documentation improvements
+    - Improved integration tests
+    - Add more examples for Wireguard, Open vSwitch, DBus
+    - Improve test stability
+    - Implementation of DBus Config/Get/Set/Try APIs
+    - Add per-route MTU option (LP: #1860201)
+    Bug fixes:
+    - Fix MAAS OVS first boot (LP: #1898997)
+    - Fix match of duplicate MAC on VLANs (LP: #1888726)
+    - Fix crash in Python parser (LP: #1904633) (LP: #1905156)
+    - Fix rename of matched interfaces at runtime (LP: #1904662)
+  * Drop all distro patches, which have been integrated upstream
+  * Update symbols file
+
+ -- Lukas Märdian <lukas.maerdian@canonical.com>  Wed, 09 Dec 2020 09:41:50 +0100
+
 netplan.io (0.100-0ubuntu4~20.04.3) focal; urgency=medium
 
   * debian/control:netplan.io: Suggest openvswitch-switch runtime dependency
@@ -9,6 +56,17 @@ netplan.io (0.100-0ubuntu4~20.04.3) focal; urgency=medium
     - Setup OVS early in network-pre.target to avoid delays (LP: #1898997)
 
  -- Lukas Märdian <lukas.maerdian@canonical.com>  Mon, 19 Oct 2020 14:49:52 +0200
+
+netplan.io (0.100-0ubuntu5) groovy; urgency=medium
+
+  * debian/control:netplan.io: Suggest openvswitch-switch runtime dependency
+  * Add d/p/0002-tests-tunnels-improve-WG-handshake-regex.patch
+    and d/p/0003-tests-ovs-fix-OVS-timeouts.patch
+    - Improve stability of autopkgtests
+  * Add d/p/0004-Fix-MAAS-OVS-first-boot-for-single-NIC-PXE-systems-1.patch
+    - Setup OVS early in network-pre.target to avoid delays (LP: #1898997)
+
+ -- Lukas Märdian <lukas.maerdian@canonical.com>  Wed, 14 Oct 2020 11:29:03 +0200
 
 netplan.io (0.100-0ubuntu4~20.04.2) focal; urgency=medium
 
