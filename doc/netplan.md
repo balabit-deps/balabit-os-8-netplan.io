@@ -275,9 +275,9 @@ Virtual devices
 
 ``critical`` (bool)
 
-:   (networkd backend only) Designate the connection as "critical to the
-    system", meaning that special care will be taken by systemd-networkd to
-    not release the assigned IP when the daemon is restarted.
+:   Designate the connection as "critical to the system", meaning that special
+    care will be taken by to not release the assigned IP when the daemon is
+    restarted. (not recognized by NetworkManager)
 
 ``dhcp-identifier`` (scalar)
 
@@ -352,7 +352,9 @@ Virtual devices
 
 :   Set default gateway for IPv4/6, for manual address configuration. This
     requires setting ``addresses`` too. Gateway IPs must be in a form
-    recognized by **``inet_pton``**(3).
+    recognized by **``inet_pton``**(3). There should only be a single gateway
+    set in your global config, to make it unambiguous. If you need multiple
+    default routes, please define them via ``routing-policy``.
 
     Example for IPv4: ``gateway4: 172.16.0.1``
     Example for IPv6: ``gateway6: "2001:4::1"``
@@ -571,6 +573,10 @@ These options are available for all types of interfaces.
           Some values are already in use to refer to specific routing tables:
           see ``/etc/iproute2/rt_tables``.
           (``NetworkManager``: as of v1.10.0)
+
+    ``mtu`` (scalar) – since **0.101**
+     :    The MTU to be used for the route, in bytes. Must be a positive integer
+          value.
 
 ``routing-policy`` (mapping)
 
@@ -1140,17 +1146,20 @@ Examples:
 
 Wireguard specific keys:
 
-    ``mark`` (scalar) – since **0.100**
-    :   Firewall mark for outgoing WireGuard packets from this interface,
-        optional.
+``mark`` (scalar) – since **0.100**
 
-    ``port`` (scalar) – since **0.100**
-    :   UDP port to listen at or ``auto``. Optional, defaults to ``auto``.
+:   Firewall mark for outgoing WireGuard packets from this interface,
+     optional.
 
-    ``peers`` (sequence of mappings) – since **0.100**
-    :   A list of peers, each having keys documented below.
+``port`` (scalar) – since **0.100**
 
-    Example:
+:   UDP port to listen at or ``auto``. Optional, defaults to ``auto``.
+
+``peers`` (sequence of mappings) – since **0.100**
+
+:   A list of peers, each having keys documented below.
+
+Example:
 
     tunnels:
         wg0:
@@ -1171,35 +1180,39 @@ Wireguard specific keys:
                   keepalive: 22
                   endpoint: 5.4.3.2:1
 
-    ``endpoint`` (scalar) – since **0.100**
-    :   Remote endpoint IPv4/IPv6 address or a hostname, followed by a colon
-        and a port number.
+``endpoint`` (scalar) – since **0.100**
 
-    ``allowed-ips`` (sequence of scalars) – since **0.100**
-    :    A list of IP (v4 or v6) addresses with CIDR masks from which this peer
-         is allowed to send incoming traffic and to which outgoing traffic for
-         this peer is directed. The catch-all 0.0.0.0/0 may be specified for
-         matching all IPv4 addresses, and ::/0 may be specified for matching
-         all IPv6 addresses.
+:   Remote endpoint IPv4/IPv6 address or a hostname, followed by a colon
+    and a port number.
 
-    ``keepalive`` (scalar) – since **0.100**
-    :    An interval in seconds, between 1 and 65535 inclusive, of how often to
-         send an authenticated empty packet to the peer for the purpose of
-         keeping a stateful firewall or NAT mapping valid persistently. Optional.
+``allowed-ips`` (sequence of scalars) – since **0.100**
 
-    ``keys`` (mapping) – since **0.100**
-    :    Define keys to use for the Wireguard peers.
+:   A list of IP (v4 or v6) addresses with CIDR masks from which this peer
+    is allowed to send incoming traffic and to which outgoing traffic for
+    this peer is directed. The catch-all 0.0.0.0/0 may be specified for
+    matching all IPv4 addresses, and ::/0 may be specified for matching
+    all IPv6 addresses.
 
-         This field can be used as a mapping, where you can further specify the
-         ``public`` and ``shared`` keys.
+``keepalive`` (scalar) – since **0.100**
 
-         ``public`` (scalar) – since **0.100**
-         :    A base64-encoded public key, requried for Wireguard peers.
+:   An interval in seconds, between 1 and 65535 inclusive, of how often to
+    send an authenticated empty packet to the peer for the purpose of
+    keeping a stateful firewall or NAT mapping valid persistently. Optional.
 
-         ``shared`` (scalar) – since **0.100**
-         :    A base64-encoded preshared key. Optional for Wireguard peers.
-              When the ``systemd-networkd`` backend (v242+) is used, this can
-              also be an absolute path to a file containing the preshared key.
+``keys`` (mapping) – since **0.100**
+
+:   Define keys to use for the Wireguard peers.
+
+    This field can be used as a mapping, where you can further specify the
+    ``public`` and ``shared`` keys.
+
+    ``public`` (scalar) – since **0.100**
+    :    A base64-encoded public key, requried for Wireguard peers.
+
+    ``shared`` (scalar) – since **0.100**
+    :    A base64-encoded preshared key. Optional for Wireguard peers.
+         When the ``systemd-networkd`` backend (v242+) is used, this can
+         also be an absolute path to a file containing the preshared key.
 
 ## Properties for device type ``vlans:``
 

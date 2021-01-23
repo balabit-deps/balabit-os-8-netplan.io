@@ -3,6 +3,7 @@
 # Copyright (C) 2018-2020 Canonical, Ltd.
 # Author: Mathieu Trudel-Lapierre <mathieu.trudel-lapierre@canonical.com>
 # Author: Łukasz 'sil2100' Zemczak <lukasz.zemczak@canonical.com>
+# Author: Lukas 'slyon' Märdian <lukas.maerdian@canonical.com>
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,9 +25,32 @@ import argparse
 import subprocess
 import netifaces
 import re
+import ctypes
+import ctypes.util
 
 NM_SERVICE_NAME = 'NetworkManager.service'
 NM_SNAP_SERVICE_NAME = 'snap.network-manager.networkmanager.service'
+
+
+class _GError(ctypes.Structure):
+    _fields_ = [("domain", ctypes.c_uint32), ("code", ctypes.c_int), ("message", ctypes.c_char_p)]
+
+
+lib = ctypes.CDLL(ctypes.util.find_library('netplan'))
+lib.netplan_parse_yaml.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.POINTER(_GError))]
+
+
+def netplan_parse(path):
+    # Clear old NetplanNetDefinitions from libnetplan memory
+    lib.netplan_clear_netdefs()
+    err = ctypes.POINTER(_GError)()
+    ret = bool(lib.netplan_parse_yaml(path.encode(), ctypes.byref(err)))
+    if not ret:
+        raise Exception(err.contents.message.decode('utf-8'))
+    lib.netplan_finish_parse(ctypes.byref(err))
+    if err:
+        raise Exception(err.contents.message.decode('utf-8'))
+    return True
 
 
 def get_generator_path():
@@ -143,24 +167,46 @@ def get_interface_driver_name(interface, only_down=False):  # pragma: nocover (c
 
 def get_interface_macaddress(interface):  # pragma: nocover (covered in autopkgtest)
     link = netifaces.ifaddresses(interface)[netifaces.AF_LINK][0]
-
     return link.get('addr')
 
 
-def is_interface_matching_name(interface, match_driver):
-    return fnmatch.fnmatchcase(interface, match_driver)
+def is_interface_matching_name(interface, match_name):
+    # globs are supported
+    return fnmatch.fnmatchcase(interface, match_name)
 
 
 def is_interface_matching_driver_name(interface, match_driver):
     driver_name = get_interface_driver_name(interface)
-
-    return match_driver == driver_name
+    # globs are supported
+    return fnmatch.fnmatchcase(driver_name, match_driver)
 
 
 def is_interface_matching_macaddress(interface, match_mac):
     macaddress = get_interface_macaddress(interface)
+    # exact, case insensitive match. globs are not supported
+    return match_mac.lower() == macaddress.lower()
 
-    return match_mac == macaddress
+
+def find_matching_iface(interfaces, match):
+    assert isinstance(match, dict)
+
+    # Filter for match.name glob, fallback to '*'
+    name_glob = match.get('name') if match.get('name', False) else '*'
+    matches = fnmatch.filter(interfaces, name_glob)
+
+    # Filter for match.macaddress (exact match)
+    if len(matches) > 1 and match.get('macaddress'):
+        matches = list(filter(lambda iface: is_interface_matching_macaddress(iface, match.get('macaddress')), matches))
+
+    # Filter for match.driver glob
+    if len(matches) > 1 and match.get('driver'):
+        matches = list(filter(lambda iface: is_interface_matching_driver_name(iface, match.get('driver')), matches))
+
+    # Return current name of unique matched interface, if available
+    if len(matches) != 1:
+        logging.info(matches)
+        return None
+    return matches[0]
 
 
 class NetplanCommand(argparse.Namespace):
