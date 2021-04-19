@@ -1,5 +1,6 @@
-From: =?utf-8?q?Lukas_M=C3=A4rdian?= <lukas.maerdian@canonical.com>
-Date: Wed, 30 Sep 2020 15:00:20 +0200
+From 6bf7ed171aaf70e3b8f369ccbd12b4059d33bafa Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Lukas=20M=C3=A4rdian?= <slyon@ubuntu.com>
+Date: Fri, 19 Mar 2021 17:33:59 +0100
 Subject: Disable some tests, due to ovs-vsctl missing on riscv64
 
 ---
@@ -7,7 +8,7 @@ Subject: Disable some tests, due to ovs-vsctl missing on riscv64
  1 file changed, 25 insertions(+)
 
 diff --git a/tests/generator/test_ovs.py b/tests/generator/test_ovs.py
-index 601ed1c..2dacf58 100644
+index e7084a9..15d4b59 100644
 --- a/tests/generator/test_ovs.py
 +++ b/tests/generator/test_ovs.py
 @@ -17,6 +17,9 @@
@@ -70,7 +71,7 @@ index 601ed1c..2dacf58 100644
    version: 2
 @@ -295,6 +304,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bond0 external-ids:netplan/lacp=active
  ''', expect_fail=True)
-         self.assertIn("Key 'lacp' is only valid for iterface type 'openvswitch bond'", err)
+         self.assertIn("Key 'lacp' is only valid for interface type 'openvswitch bond'", err)
  
 +    @unittest.skipIf(os.uname().machine == 'riscv64', 'missing ovs-vsctl')
      def test_bond_mode_implicit_params(self):
@@ -118,7 +119,7 @@ index 601ed1c..2dacf58 100644
    version: 2
 @@ -509,6 +524,7 @@ ExecStart=/usr/bin/ovs-vsctl set Bridge br0 external-ids:netplan/rstp_enable=tru
  ''', expect_fail=True)
-         self.assertIn("Key is only valid for iterface type 'openvswitch bridge'", err)
+         self.assertIn("Key is only valid for interface type 'openvswitch bridge'", err)
  
 +    @unittest.skipIf(os.uname().machine == 'riscv64', 'missing ovs-vsctl')
      def test_bridge_set_protocols(self):
@@ -126,7 +127,7 @@ index 601ed1c..2dacf58 100644
    version: 2
 @@ -550,6 +566,7 @@ ExecStart=/usr/bin/ovs-vsctl set Bridge br0 external-ids:netplan/protocols=OpenF
  ''', expect_fail=True)
-         self.assertIn("Key 'protocols' is only valid for iterface type 'openvswitch bridge'", err)
+         self.assertIn("Key 'protocols' is only valid for interface type 'openvswitch bridge'", err)
  
 +    @unittest.skipIf(os.uname().machine == 'riscv64', 'missing ovs-vsctl')
      def test_bridge_controller(self):
@@ -189,10 +190,13 @@ index 601ed1c..2dacf58 100644
          err = self.generate('''network:
      version: 2
 @@ -990,6 +1014,7 @@ ExecStart=/usr/bin/ovs-vsctl set Interface br0.100 external-ids:netplan=true
-         self.assert_ovs({})
+         self.assert_ovs({'cleanup.service': OVS_CLEANUP % {'iface': 'cleanup'}})
          self.assert_networkd({})
  
 +    @unittest.skipIf(os.uname().machine == 'riscv64', 'missing ovs-vsctl')
      def test_bridge_non_ovs_bond(self):
          self.generate('''network:
      version: 2
+-- 
+2.27.0
+

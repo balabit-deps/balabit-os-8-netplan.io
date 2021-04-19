@@ -62,7 +62,8 @@ Kind=vlan
 Id=3
 ''',
                               'enblue.network': ND_WITHIP % ('enblue', '1.2.3.4/24'),
-                              'enred.network': ND_EMPTY % ('enred', 'ipv6'),
+                              'enred.network': (ND_EMPTY % ('enred', 'ipv6'))
+                              .replace('[Network]', '[Link]\nMACAddress=aa:bb:cc:dd:ee:11\n\n[Network]'),
                               'engreen.network': (ND_DHCP6_WOCARRIER % 'engreen')})
 
         self.assert_nm(None, '''[keyfile]
@@ -231,8 +232,6 @@ uuid=%s
 
 [ethernet]
 wake-on-lan=0
-
-[802-3-ethernet]
 mac-address=11:22:33:44:55:66
 
 [ipv4]

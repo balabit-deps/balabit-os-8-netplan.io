@@ -1,5 +1,4 @@
-0002-Disable-some-tests-due-to-ovs-vsctl-missing-on-riscv.patch
-0001-Fix-changing-of-macaddress-with-systemd-v247-178.patch
-0002-parse-fix-networkmanager-backend-options-for-modem-c.patch
-0004-tests-tunnels-improve-test-reliability.patch
-0005-tests-dbus-improve-test-stability-of-timeouts.patch
+0000-Disable-some-tests-due-to-ovs-vsctl-missing-on-riscv.patch
+0001-tests-bonds-fix-flaky-resend_igmp-test.patch
+0002-tests-tunnels-improve-flaky-wireguard-test-with-wait.patch
+fix-lp1922898.patch

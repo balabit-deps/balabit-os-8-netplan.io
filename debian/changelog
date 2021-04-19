@@ -1,3 +1,126 @@
+netplan.io (0.102-0ubuntu1~20.04.2) focal; urgency=medium
+
+  * Backport netplan.io 0.102-0ubuntu1 to 20.04 (LP: #1919453)
+    - Includes NetworkManager YAML backend API
+    - Includes 'congestion-window' & 'advertised-receive-window' keys
+    - Includes 'netplan set' improvements
+  * Keep riscv64 build-time tests disabled
+  * Add d/p/0002-tests-tunnels-improve-flaky-wireguard-test-with-wait.patch
+  * Fix regression (LP: #1922898), by avoiding to break the ABI
+    This reverts the "Added ttl option for tunnels" feature
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Mon, 19 Apr 2021 15:08:37 +0200
+
+netplan.io (0.102-0ubuntu1) hirsute; urgency=medium
+
+  * New upstream release: 0.102 (LP: #1919453)
+    - New API for NetworkManager YAML backend
+    - Added congestion-window & advertised-receive-window options for routes
+    - Added ttl option for tunnels (LP: #1846783)
+    - Improved netplan set CLI to override existing files
+    - Moved upstream repository to https://github.com/canonical/netplan/
+    - Documentation improvements
+    - Improved Github Actions CI and CodeQL integration
+    - Minor cleanup/typos/test improvements
+    Bug fixes:
+    - systemd v247 compatibility (for changing MAC address)
+    - OVS 2.15 compatibility (wording changes)
+    - Allow networkmanager: backend options for modem devices
+    - Prevent duplicate ARPIPTargets in NetDev files (LP: #1915837)
+  * Drop all distro patches, which have been integrated upstream
+  * Update symbols file
+  * Enable pristine-tar in gbp
+  * Allow running more tests in a container
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Wed, 24 Mar 2021 08:54:23 +0100
+
+netplan.io (0.101-4ubuntu3) hirsute; urgency=medium
+
+  * d/changelog: Restore history, which was lost during previous merge
+  * d/watch, d/copyright: Update Github URL
+  * d/tests/control:
+    - Mark ovs & cloud-init tests non-flaky
+    - Mark tests with the "breaks-testbed" restriction
+  * Fix DNS issues during tests on ppc64el (LP: #1916888):
+    - d/p/0007-tests-keep-management-network-up-at-all-times-during.patch
+    - d/p/0008-tests-integration-cleanup-OVS-WPA-files.patch
+
+ -- Lukas Märdian <lukas.maerdian@canonical.com>  Fri, 26 Feb 2021 17:47:08 +0100
+
+netplan.io (0.101-4ubuntu2) hirsute; urgency=medium
+
+  * No change rebuild with fixed ownership.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 16 Feb 2021 15:18:25 +0000
+
+netplan.io (0.101-4ubuntu1) hirsute; urgency=medium
+
+  * Merge with Debian. Remaining changes:
+    - Keep running dh_auto_test
+    - Keep openvswitch dependency for all arches
+    - 0003-tests-adopt-to-wording-changes-as-of-OVS-2.15.patch
+    - 0004-tests-tunnels-improve-test-reliability.patch
+    - 0005-tests-dbus-improve-test-stability-of-timeouts.patch
+    - 0006-tests-integration-adopt-for-racy-systemd-MAC-assignm.patch
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Mon, 08 Feb 2021 11:54:07 +0100
+
+netplan.io (0.101-4) unstable; urgency=medium
+
+  * Build-depend on ovs on amd64 only due to a bug in its postinst.
+    See #979366 for details.
+  * Drop the custom build profile, nocheck is enough.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Tue, 05 Jan 2021 22:01:50 +0100
+
+netplan.io (0.101-3) unstable; urgency=medium
+
+  * Mark the package linux-any.
+  * Skip openvswitch-switch dependency on m68k and ppc64.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Tue, 05 Jan 2021 19:28:50 +0100
+
+netplan.io (0.101-2) unstable; urgency=medium
+
+  * Reindent debian/control.
+  * Add build profiles.
+  * Add cloud tests but mark them as flaky and skip-not-installable
+    for now.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Tue, 05 Jan 2021 17:40:42 +0100
+
+netplan.io (0.101-1) unstable; urgency=medium
+
+  [ Andrej Shadura ]
+  * New upstream release.
+  * Merge changes from Ubuntu.
+  * Let tests fail.
+  * Remove the hack to fix build with GCC 10 (actually closes: #957603).
+
+  [ Lukas Märdian ]
+  * d/control: fix lintian warning about trailing whitespace
+  * d/p/0001-Fix-changing-of-macaddress-with-systemd-v247-178.patch:
+    Fix MAC address changes with systemd v247 by using a new approach inside
+    systemd's .network file. It also works with older version of systemd.
+  * Add d/p/0002-parse-fix-networkmanager-backend-options-for-modem-c.patch:
+    Allows parsing of networkmanager: backend handlers for modem devices
+  * Update symbols file
+
+  [ Michael Biebl ]
+  * Stop using deprecated systemd-resolve tool (Closes: #979266).
+
+ -- Andrej Shadura <andrewsh@debian.org>  Mon, 04 Jan 2021 20:34:58 +0100
+
+netplan.io (0.101-0ubuntu5) hirsute; urgency=medium
+
+  * Add d/p/0004-tests-tunnels-improve-test-reliability.patch
+    and d/p/0005-tests-dbus-improve-test-stability-of-timeouts.patch
+    for improved compile-time test stability
+  * Add d/p/0006-tests-integration-adopt-for-racy-systemd-MAC-assignm.patch
+    for compatibility with new systemd
+
+ -- Lukas Märdian <lukas.maerdian@canonical.com>  Thu, 04 Feb 2021 11:35:28 +0100
+
 netplan.io (0.101-0ubuntu3~20.04.2) focal; urgency=medium
 
   * Backport netplan.io 0.101-0ubuntu3 to 20.04 (LP: #1908509)
@@ -10,6 +133,15 @@ netplan.io (0.101-0ubuntu3~20.04.2) focal; urgency=medium
     - debian/patches/0005-tests-dbus-improve-test-stability-of-timeouts.patch
 
  -- Lukas Märdian <lukas.maerdian@canonical.com>  Fri, 08 Jan 2021 15:17:07 +0100
+
+netplan.io (0.101-0ubuntu4) hirsute; urgency=medium
+
+  * Add d/p/0003-tests-adopt-to-wording-changes-as-of-OVS-2.15.patch:
+    Adopt autopkgtests to wording changes of OVS 2.15 (slave -> member)
+  * d/control: fix lintian warning about trailing whitespace
+  * d/control: fix lintian warning about deprecated d/compat file
+
+ -- Lukas Märdian <lukas.maerdian@canonical.com>  Wed, 06 Jan 2021 09:56:57 +0100
 
 netplan.io (0.101-0ubuntu3) hirsute; urgency=medium
 
@@ -138,7 +270,54 @@ netplan.io (0.100-0ubuntu1) groovy; urgency=medium
 
  -- Lukas Märdian <lukas.maerdian@canonical.com>  Thu, 03 Sep 2020 15:51:29 +0200
 
+netplan.io (0.99-2) experimental; urgency=medium
+
+  * Split libnetplan off into separate packages.
+  * Force -fcommon to enable builds with GCC 10 to work around #957603.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Mon, 27 Apr 2020 17:17:54 +0200
+
+netplan.io (0.99-1) unstable; urgency=medium
+
+  [ Andrej Shadura ]
+  * New upstream release.
+  * Drop old upstream patches.
+  * Update the co-maintainer list.
+  * Bump Standards-Version to 4.5.0.
+  * Update copyright years.
+
+  [ Lukas Märdian ]
+  * debian:tests:control: add autopkgtest dependencies.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Mon, 27 Apr 2020 11:01:26 +0200
+
+netplan.io (0.99-0ubuntu6) groovy; urgency=medium
+
+  * d/p/0005-Fix-GCC-10-fno-common-linker-errors-LP-1875412-155.patch
+    - Fix FTBFS if compiled using GCC-10 (LP: #1875412)
+    - Using upstream commit 50ac1a1
+  * Refresh patches using 'gbp pq'
+
+ -- Lukas Märdian <lukas.maerdian@canonical.com>  Tue, 28 Jul 2020 14:12:28 +0200
+
+netplan.io (0.99-0ubuntu5) groovy; urgency=medium
+
+  * d/p/0001-Fix-autopkgtest-on-arm64-with-NM-1.24-146.patch
+    - Fix autopkgtest failure on arm64 in combination with new NM-1.24
+  * d/p/0001-Call-daemon-reload-after-we-touched-systemd-unit-fil.patch
+    - Re-calculate systemd dependencies, after touching .service
+      units (LP: #1874494)
+
+ -- Lukas Märdian <lukas.maerdian@canonical.com>  Thu, 18 Jun 2020 11:36:59 +0200
+
 netplan.io (0.99-0ubuntu3~20.04.2) focal; urgency=medium
+
+  * d/p/0002-Fix-process_link_changes-handling-up-interfaces.patch:
+    - Fix process_link_changes handling 'up' interfaces (LP: #1875411)
+
+ -- Heitor Alves de Siqueira <halves@canonical.com>  Thu, 28 May 2020 21:09:51 +0000
+
+netplan.io (0.99-0ubuntu4) groovy; urgency=medium
 
   * d/p/0002-Fix-process_link_changes-handling-up-interfaces.patch:
     - Fix process_link_changes handling 'up' interfaces (LP: #1875411)
@@ -198,6 +377,28 @@ netplan.io (0.99-0ubuntu1) focal; urgency=medium
     d/p/0002-Adopt-integration-tests-for-NetworkManager-v1.22-foc.patch
 
  -- Łukasz 'sil2100' Zemczak <lukasz.zemczak@ubuntu.com>  Thu, 16 Apr 2020 09:13:50 +0200
+
+netplan.io (0.98-2) unstable; urgency=medium
+
+  * Cherry-pick upstream commits.
+  * Use debhelper-compat instead of debian/compat.
+  * Bump debhelper from old 11 to 12.
+  * Bump Standards-Version to 4.4.1 (no changes).
+
+ -- Andrej Shadura <andrewsh@debian.org>  Fri, 01 Nov 2019 15:21:21 +0100
+
+netplan.io (0.98-1) unstable; urgency=medium
+
+  [ Andrej Shadura ]
+  * New upstream release: 0.98 (LP: #1840832).
+  * Run all autopkgtests with Restriction: isolation-machine (Closes:
+    #919426).
+
+  [ Mathieu Trudel-Lapierre ]
+  * debian/control: Add Build-Depends on libsystemd-dev for the D-Bus feature,
+    and on dbus-x11 for dbus-launch used in tests.
+
+ -- Andrej Shadura <andrewsh@debian.org>  Thu, 26 Sep 2019 14:35:32 +0200
 
 netplan.io (0.98-0ubuntu4) focal; urgency=medium
 

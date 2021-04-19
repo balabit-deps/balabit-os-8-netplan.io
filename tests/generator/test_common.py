@@ -390,6 +390,41 @@ Label=ip6
             'br0.network': ND_EMPTY % ('br0', 'ipv6'),
             'br0.netdev': '[NetDev]\nName=br0\nKind=bridge\n'})
 
+    def test_bond_arp_ip_targets_multi_pass(self):
+        self.generate('''network:
+  bonds:
+    bond0:
+      interfaces:
+      - eno1
+      parameters:
+        arp-ip-targets:
+          - 10.10.10.10
+          - 20.20.20.20
+  ethernets:
+    eno1: {}
+  version: 2''')
+        self.assert_networkd({'bond0.netdev': '''[NetDev]
+Name=bond0
+Kind=bond
+
+[Bond]
+ARPIPTargets=10.10.10.10 20.20.20.20
+''',
+                              'bond0.network': '''[Match]
+Name=bond0
+
+[Network]
+LinkLocalAddressing=ipv6
+ConfigureWithoutCarrier=yes
+''',
+                              'eno1.network': '''[Match]
+Name=eno1
+
+[Network]
+LinkLocalAddressing=no
+Bond=bond0
+'''})
+
     def test_dhcp_critical_true(self):
         self.generate('''network:
   version: 2
@@ -705,7 +740,7 @@ id=netplan-bond0
 type=bond
 interface-name=bond0
 
-[802-3-ethernet]
+[ethernet]
 mtu=9000
 
 [ipv4]
@@ -723,8 +758,6 @@ master=bond0
 
 [ethernet]
 wake-on-lan=0
-
-[802-3-ethernet]
 mtu=1280
 
 [ipv4]

@@ -9,7 +9,7 @@ Depends: @,
   python3-gi,
   gir1.2-nm-1.0,
   openvswitch-switch,
-Restrictions: allow-stderr, needs-root, isolation-machine
+Restrictions: allow-stderr, needs-root, isolation-machine, skip-not-installable, breaks-testbed
 Features: test-name=ovs
 
 Test-Command: python3 tests/integration/run.py --test=ethernets
@@ -22,7 +22,7 @@ Depends: @,
   libnm0,
   python3-gi,
   gir1.2-nm-1.0,
-Restrictions: allow-stderr, needs-root, isolation-machine
+Restrictions: allow-stderr, needs-root, isolation-container, breaks-testbed
 Features: test-name=ethernets
 
 Test-Command: python3 tests/integration/run.py --test=bridges
@@ -35,7 +35,7 @@ Depends: @,
   libnm0,
   python3-gi,
   gir1.2-nm-1.0,
-Restrictions: allow-stderr, needs-root, isolation-machine
+Restrictions: allow-stderr, needs-root, isolation-machine, breaks-testbed
 Features: test-name=bridges
 
 Test-Command: python3 tests/integration/run.py --test=bonds
@@ -48,7 +48,7 @@ Depends: @,
   libnm0,
   python3-gi,
   gir1.2-nm-1.0,
-Restrictions: allow-stderr, needs-root, isolation-machine
+Restrictions: allow-stderr, needs-root, isolation-machine, breaks-testbed
 Features: test-name=bonds
 
 Test-Command: python3 tests/integration/run.py --test=routing
@@ -61,7 +61,7 @@ Depends: @,
   libnm0,
   python3-gi,
   gir1.2-nm-1.0,
-Restrictions: allow-stderr, needs-root, isolation-machine
+Restrictions: allow-stderr, needs-root, isolation-machine, breaks-testbed
 Features: test-name=routing
 
 Test-Command: python3 tests/integration/run.py --test=vlans
@@ -74,7 +74,7 @@ Depends: @,
   libnm0,
   python3-gi,
   gir1.2-nm-1.0,
-Restrictions: allow-stderr, needs-root, isolation-machine
+Restrictions: allow-stderr, needs-root, isolation-container, breaks-testbed
 Features: test-name=vlans
 
 Test-Command: python3 tests/integration/run.py --test=wifi
@@ -87,7 +87,7 @@ Depends: @,
   libnm0,
   python3-gi,
   gir1.2-nm-1.0,
-Restrictions: allow-stderr, needs-root, isolation-machine, flaky
+Restrictions: allow-stderr, needs-root, isolation-machine, flaky, breaks-testbed
 Features: test-name=wifi
 
 Test-Command: python3 tests/integration/run.py --test=tunnels
@@ -101,7 +101,7 @@ Depends: @,
   python3-gi,
   gir1.2-nm-1.0,
   wireguard-tools,
-Restrictions: allow-stderr, needs-root, isolation-machine
+Restrictions: allow-stderr, needs-root, isolation-machine, breaks-testbed
 Features: test-name=tunnels
 
 Test-Command: python3 tests/integration/run.py --test=scenarios
@@ -114,7 +114,7 @@ Depends: @,
   libnm0,
   python3-gi,
   gir1.2-nm-1.0,
-Restrictions: allow-stderr, needs-root, isolation-machine
+Restrictions: allow-stderr, needs-root, isolation-machine, breaks-testbed
 Features: test-name=scenarios
 
 Test-Command: python3 tests/integration/run.py --test=regressions
@@ -127,11 +127,11 @@ Depends: @,
   libnm0,
   python3-gi,
   gir1.2-nm-1.0,
-Restrictions: allow-stderr, needs-root, isolation-machine
+Restrictions: allow-stderr, needs-root, isolation-container, breaks-testbed
 Features: test-name=regressions
 
 Tests: autostart
-Restrictions: allow-stderr, needs-root, isolation-container
+Restrictions: allow-stderr, needs-root, isolation-container, breaks-testbed
 
 Tests: cloud-init
-Restrictions: allow-stderr, needs-root, isolation-container
+Restrictions: allow-stderr, needs-root, isolation-container, breaks-testbed
