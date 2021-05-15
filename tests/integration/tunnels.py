@@ -67,6 +67,7 @@ class _CommonTests():
       mode: ipip
       local: 192.168.5.1
       remote: 99.99.99.99
+      ttl: 64
 ''' % {'r': self.backend, 'ec': self.dev_e_client, 'e2c': self.dev_e2_client})
         self.generate_and_settle()
         self.assert_iface('tun0', ['tun0@NONE', 'link.* 192.168.5.1 peer 99.99.99.99'])
@@ -123,8 +124,8 @@ class _CommonTests():
         self.assertIn("fwmark: 0x2a", out)
         self.assertIn("peer: M9nt4YujIOmNrRmpIRTmYSfMdrpvE7u6WkG8FY8WjG4=", out)
         self.assertIn("allowed ips: 20.20.20.0/24", out)
-        self.assertRegex(out, r'latest handshake: \d+ seconds? ago')
-        self.assertRegex(out, r'transfer: \d+ B received, \d+ B sent')
+        self.assertRegex(out, r'latest handshake: (\d+ seconds? ago|Now)')
+        self.assertRegex(out, r'transfer: \d+.*B received, \d+.*B sent')
         self.assert_iface('wg0', ['inet 10.10.10.20/24'])
         # Verify client
         out = subprocess.check_output(['wg', 'show', 'wg1', 'private-key'], universal_newlines=True)
@@ -138,7 +139,7 @@ class _CommonTests():
         self.assertIn("allowed ips: 0.0.0.0/0", out)
         self.assertIn("persistent keepalive: every 21 seconds", out)
         self.assertRegex(out, r'latest handshake: (\d+ seconds? ago|Now)')
-        self.assertRegex(out, r'transfer: \d+ B received, \d+ B sent')
+        self.assertRegex(out, r'transfer: \d+.*B received, \d+.*B sent')
         self.assert_iface('wg1', ['inet 20.20.20.10/24'])
 
 

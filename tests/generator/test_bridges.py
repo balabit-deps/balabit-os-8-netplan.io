@@ -35,6 +35,9 @@ class TestNetworkd(TestBase):
         self.assert_networkd({'br0.network': '''[Match]
 Name=br0
 
+[Link]
+MACAddress=00:01:02:03:04:05
+
 [Network]
 DHCP=ipv4
 LinkLocalAddressing=ipv6
@@ -358,7 +361,7 @@ id=netplan-br0
 type=bridge
 interface-name=br0
 
-[802-3-ethernet]
+[ethernet]
 cloned-mac-address=00:01:02:03:04:05
 
 [ipv4]
