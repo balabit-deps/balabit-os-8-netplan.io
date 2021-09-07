@@ -1,0 +1,65 @@
+From: =?utf-8?q?Lukas_M=C3=A4rdian?= <slyon@ubuntu.com>
+Date: Fri, 13 Aug 2021 15:19:32 +0200
+Subject: Mute gateway4/6 deprecation warnings
+
+---
+ src/parse.c                    | 4 ----
+ tests/generator/test_common.py | 6 ++----
+ 2 files changed, 2 insertions(+), 8 deletions(-)
+
+diff --git a/src/parse.c b/src/parse.c
+index 09cd1e2..20ce034 100644
+--- a/src/parse.c
++++ b/src/parse.c
+@@ -1118,8 +1118,6 @@ handle_gateway4(yaml_document_t* doc, yaml_node_t* node, const void* _, GError**
+     if (!is_ip4_address(scalar(node)))
+         return yaml_error(node, error, "invalid IPv4 address '%s'", scalar(node));
+     set_str_if_null(cur_netdef->gateway4, scalar(node));
+-    g_warning("`gateway4` has been deprecated, use default routes instead.\n"
+-              "See the 'Default routes' section of the documentation for more details.");
+     return TRUE;
+ }
+ 
+@@ -1129,8 +1127,6 @@ handle_gateway6(yaml_document_t* doc, yaml_node_t* node, const void* _, GError**
+     if (!is_ip6_address(scalar(node)))
+         return yaml_error(node, error, "invalid IPv6 address '%s'", scalar(node));
+     set_str_if_null(cur_netdef->gateway6, scalar(node));
+-    g_warning("`gateway6` has been deprecated, use default routes instead.\n"
+-              "See the 'Default routes' section of the documentation for more details.");
+     return TRUE;
+ }
+ 
+diff --git a/tests/generator/test_common.py b/tests/generator/test_common.py
+index 7bdb4b4..baf3f9f 100644
+--- a/tests/generator/test_common.py
++++ b/tests/generator/test_common.py
+@@ -556,13 +556,12 @@ UseMTU=true
+ '''})
+ 
+     def test_gateway4(self):
+-        err = self.generate('''network:
++        self.generate('''network:
+   version: 2
+   ethernets:
+     engreen:
+       addresses: ["192.168.14.2/24"]
+       gateway4: 192.168.14.1''')
+-        self.assertIn("`gateway4` has been deprecated, use default routes instead.", err)
+         self.assert_networkd({'engreen.network': '''[Match]
+ Name=engreen
+ 
+@@ -573,13 +572,12 @@ Gateway=192.168.14.1
+ '''})
+ 
+     def test_gateway6(self):
+-        err = self.generate('''network:
++        self.generate('''network:
+   version: 2
+   ethernets:
+     engreen:
+       addresses: ["2001:FFfe::1/64"]
+       gateway6: 2001:FFfe::2''')
+-        self.assertIn("`gateway6` has been deprecated, use default routes instead.", err)
+         self.assert_networkd({'engreen.network': '''[Match]
+ Name=engreen
+ 

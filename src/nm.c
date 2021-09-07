@@ -41,18 +41,22 @@ static void
 g_string_append_netdef_match(GString* s, const NetplanNetDefinition* def)
 {
     g_assert(!def->match.driver || def->set_name);
-    if (def->match.mac) {
-        g_string_append_printf(s, "mac:%s", def->match.mac);
-    } else if (def->match.original_name || def->set_name || def->type >= NETPLAN_DEF_TYPE_VIRTUAL) {
-        /* we always have the renamed name here */
-        g_string_append_printf(s, "interface-name:%s",
-                (def->type >= NETPLAN_DEF_TYPE_VIRTUAL) ? def->id
-                                          : (def->set_name ?: def->match.original_name));
+    if (def->match.mac || def->match.original_name || def->set_name || def->type >= NETPLAN_DEF_TYPE_VIRTUAL) {
+        if (def->match.mac) {
+            g_string_append_printf(s, "mac:%s,", def->match.mac);
+        }
+        /* MAC could change, e.g. for bond slaves. Ignore by interface-name as well */
+        if (def->match.original_name || def->set_name || def->type >= NETPLAN_DEF_TYPE_VIRTUAL) {
+            /* we always have the renamed name here */
+            g_string_append_printf(s, "interface-name:%s,",
+                    (def->type >= NETPLAN_DEF_TYPE_VIRTUAL) ? def->id
+                                            : (def->set_name ?: def->match.original_name));
+        }
     } else {
         /* no matches → match all devices of that type */
         switch (def->type) {
             case NETPLAN_DEF_TYPE_ETHERNET:
-                g_string_append(s, "type:ethernet");
+                g_string_append(s, "type:ethernet,");
                 break;
             /* This cannot be reached with just NM and networkd backends, as
              * networkd does not support wifi and thus we'll never blacklist a
@@ -212,9 +216,15 @@ write_routes(const NetplanNetDefinition* def, GKeyFile *kf, int family)
     if (def->routes != NULL) {
         for (unsigned i = 0, j = 1; i < def->routes->len; ++i) {
             const NetplanIPRoute *cur_route = g_array_index(def->routes, NetplanIPRoute*, i);
+            const char *destination;
 
             if (cur_route->family != family)
                 continue;
+
+            if (g_strcmp0(cur_route->to, "default") == 0)
+                destination = get_global_network(family);
+            else
+                destination = cur_route->to;
 
             if (cur_route->type && g_ascii_strcasecmp(cur_route->type, "unicast") != 0) {
                 g_fprintf(stderr, "ERROR: %s: NetworkManager only supports unicast routes\n", def->id);
@@ -234,7 +244,7 @@ write_routes(const NetplanNetDefinition* def, GKeyFile *kf, int family)
 
             tmp_key = g_strdup_printf("route%d", j);
             tmp_val = g_string_new(NULL);
-            g_string_printf(tmp_val, "%s,%s", cur_route->to, cur_route->via);
+            g_string_printf(tmp_val, "%s,%s", destination, cur_route->via);
             if (cur_route->metric != NETPLAN_METRIC_UNSPEC)
                 g_string_append_printf(tmp_val, ",%d", cur_route->metric);
             g_key_file_set_string(kf, group, tmp_key, tmp_val->str);
@@ -409,8 +419,8 @@ write_tunnel_params(const NetplanNetDefinition* def, GKeyFile *kf)
     g_key_file_set_integer(kf, "ip-tunnel", "mode", def->tunnel.mode);
     g_key_file_set_string(kf, "ip-tunnel", "local", def->tunnel.local_ip);
     g_key_file_set_string(kf, "ip-tunnel", "remote", def->tunnel.remote_ip);
-    if (def->tunnel.ttl)
-        g_key_file_set_uint64(kf, "ip-tunnel", "ttl", def->tunnel.ttl);
+    if (def->tunnel_ttl)
+        g_key_file_set_uint64(kf, "ip-tunnel", "ttl", def->tunnel_ttl);
     if (def->tunnel.input_key)
         g_key_file_set_string(kf, "ip-tunnel", "input-key", def->tunnel.input_key);
     if (def->tunnel.output_key)
@@ -424,7 +434,6 @@ write_dot1x_auth_parameters(const NetplanAuthenticationSettings* auth, GKeyFile 
         return;
 
     switch (auth->eap_method) {
-        case NETPLAN_AUTH_EAP_NONE: break; // LCOV_EXCL_LINE
         case NETPLAN_AUTH_EAP_TLS:
             g_key_file_set_string(kf, "802-1x", "eap", "tls");
             break;
@@ -434,6 +443,7 @@ write_dot1x_auth_parameters(const NetplanAuthenticationSettings* auth, GKeyFile 
         case NETPLAN_AUTH_EAP_TTLS:
             g_key_file_set_string(kf, "802-1x", "eap", "ttls");
             break;
+        default: break;  // LCOV_EXCL_LINE
     }
 
     if (auth->identity)
@@ -461,7 +471,6 @@ write_wifi_auth_parameters(const NetplanAuthenticationSettings* auth, GKeyFile *
         return;
 
     switch (auth->key_management) {
-        case NETPLAN_AUTH_KEY_MANAGEMENT_NONE: break; // LCOV_EXCL_LINE
         case NETPLAN_AUTH_KEY_MANAGEMENT_WPA_PSK:
             g_key_file_set_string(kf, "wifi-security", "key-mgmt", "wpa-psk");
             if (auth->password)
@@ -473,6 +482,7 @@ write_wifi_auth_parameters(const NetplanAuthenticationSettings* auth, GKeyFile *
         case NETPLAN_AUTH_KEY_MANAGEMENT_8021X:
             g_key_file_set_string(kf, "wifi-security", "key-mgmt", "ieee8021x");
             break;
+        default: break; // LCOV_EXCL_LINE
     }
 
     write_dot1x_auth_parameters(auth, kf);
@@ -594,6 +604,17 @@ write_nm_conf_access_point(NetplanNetDefinition* def, const char* rootdir, const
         maybe_generate_uuid(def);
         uuid_unparse(def->uuid, uuidstr);
         g_key_file_set_string(kf, "connection", "uuid", uuidstr);
+    }
+
+    if (def->activation_mode) {
+        /* XXX: For now NetworkManager only supports the "manual" activation
+         * mode */
+        if (!!g_strcmp0(def->activation_mode, "manual")) {
+            g_fprintf(stderr, "ERROR: %s: NetworkManager definitions do not support activation-mode %s\n", def->id, def->activation_mode);
+            exit(1);
+        }
+        /* "manual" */
+        g_key_file_set_boolean(kf, "connection", "autoconnect", FALSE);
     }
 
     if (def->type < NETPLAN_DEF_TYPE_VIRTUAL) {
@@ -929,13 +950,13 @@ nd_append_non_nm_ids(gpointer data, gpointer str)
 
     if (nd->backend != NETPLAN_BACKEND_NM) {
         if (nd->match.driver) {
+            /* TODO: NetworkManager supports (non-globbing) "driver:..." matching nowadays */
             /* NM cannot match on drivers, so ignore these via udev rules */
             if (!udev_rules)
                 udev_rules = g_string_new(NULL);
             g_string_append_printf(udev_rules, "ACTION==\"add|change\", SUBSYSTEM==\"net\", ENV{ID_NET_DRIVER}==\"%s\", ENV{NM_UNMANAGED}=\"1\"\n", nd->match.driver);
         } else {
             g_string_append_netdef_match((GString*) str, nd);
-            g_string_append((GString*) str, ",");
         }
     }
 }

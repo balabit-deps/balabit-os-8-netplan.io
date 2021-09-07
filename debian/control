@@ -7,7 +7,8 @@ Uploaders:
  Łukasz 'sil2100' Zemczak <lukasz.zemczak@canonical.com>
 Section: net
 Priority: optional
-Standards-Version: 4.5.0
+Standards-Version: 4.5.1
+Rules-Requires-Root: no
 Build-Depends:
  debhelper-compat (= 12),
  pkg-config,
@@ -16,14 +17,14 @@ Build-Depends:
  libglib2.0-dev,
  uuid-dev,
  python3 (>= 3.1),
- python3-coverage,
- python3-yaml,
- python3-netifaces,
+ python3-coverage <!nocheck>,
+ python3-yaml <!nocheck>,
+ python3-netifaces <!nocheck>,
  libsystemd-dev,
  systemd,
- dbus-x11,
+ dbus-x11 <!nocheck>,
  pyflakes3 <!nocheck>,
- pycodestyle | pep8 <!nocheck>,
+ pycodestyle <!nocheck> | pep8 <!nocheck>,
  python3-nose <!nocheck>,
  pandoc,
  openvswitch-switch [!riscv64] <!nocheck>,
@@ -42,7 +43,7 @@ Depends:
  python3,
  python3-yaml,
  python3-netifaces,
- systemd (>= 239~),
+ systemd (>= 245.4-4ubuntu3.8),
 Suggests:
  network-manager | wpasupplicant,
  openvswitch-switch [!riscv64],

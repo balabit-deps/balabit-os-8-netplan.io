@@ -1,0 +1,21 @@
+Description: Fix ethernets test with network-manage 1.32.10
+ NetworkManager's udev rules are smarter about catching renamed veths now, so
+ the udev rule the integration tests use to manage their veths need to list the
+ names the veths are renamed to too.
+Author: Michael Hudson-Doyle <michael.hudson@ubuntu.com>
+Origin: vendor
+Forwarded: no
+Last-Update: 2021-09-01
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- a/tests/integration/base.py
++++ b/tests/integration/base.py
+@@ -70,7 +70,7 @@
+         # ensure NM can manage our fake eths
+         os.makedirs('/run/udev/rules.d', exist_ok=True)
+         with open('/run/udev/rules.d/99-nm-veth-test.rules', 'w') as f:
+-            f.write('ENV{ID_NET_DRIVER}=="veth", ENV{INTERFACE}=="eth42|eth43", ENV{NM_UNMANAGED}="0"\n')
++            f.write('ENV{ID_NET_DRIVER}=="veth", ENV{INTERFACE}=="eth42|eth43|iface1|iface2", ENV{NM_UNMANAGED}="0"\n')
+         subprocess.check_call(['udevadm', 'control', '--reload'])
+ 
+         os.makedirs('/etc/NetworkManager/conf.d', exist_ok=True)
