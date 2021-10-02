@@ -17,6 +17,7 @@
 
 #include <stdlib.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 #include <glib.h>
 #include <glib/gprintf.h>
@@ -232,7 +233,7 @@ netplan_delete_connection(const char* id, const char* rootdir)
     netplan_clear_netdefs();
 
     /* TODO: refactor logic to actually be inside the library instead of spawning another process */
-    const gchar *argv[] = { "/sbin/netplan", "set", del, "--origin-hint" , filename, NULL, NULL, NULL };
+    const gchar *argv[] = { SBINDIR "/" "netplan", "set", del, "--origin-hint" , filename, NULL, NULL, NULL };
     if (rootdir) {
         argv[5] = "--root-dir";
         argv[6] = rootdir;
@@ -246,7 +247,7 @@ gboolean
 netplan_generate(const char* rootdir)
 {
     /* TODO: refactor logic to actually be inside the library instead of spawning another process */
-    const gchar *argv[] = { "/sbin/netplan", "generate", NULL , NULL, NULL };
+    const gchar *argv[] = { SBINDIR "/" "netplan", "generate", NULL , NULL, NULL };
     if (rootdir) {
         argv[2] = "--root-dir";
         argv[3] = rootdir;
@@ -311,4 +312,18 @@ netplan_get_filename_by_id(const char* netdef_id, const char* rootdir)
     filename = g_strdup(nd->filename);
     netplan_clear_netdefs();
     return filename;
+}
+
+/**
+ * Get a static string describing the default global network
+ * for a given address family.
+ */
+const char *
+get_global_network(int ip_family)
+{
+    g_assert(ip_family == AF_INET || ip_family == AF_INET6);
+    if (ip_family == AF_INET)
+        return "0.0.0.0/0";
+    else
+        return "::/0";
 }

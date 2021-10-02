@@ -73,6 +73,54 @@ UseMTU=true
         err = self.generate(self.config_with_optional_addresses(eth_name, '["invalid"]'), expect_fail=True)
         self.assertIn('invalid value for optional-addresses', err)
 
+    def test_activation_mode_off(self):
+        self.generate('''network:
+  version: 2
+  ethernets:
+    eth0:
+      dhcp6: true
+      activation-mode: off''')
+        self.assert_networkd({'eth0.network': '''[Match]
+Name=eth0
+
+[Link]
+ActivationPolicy=always-down
+RequiredForOnline=no
+
+[Network]
+DHCP=ipv6
+LinkLocalAddressing=ipv6
+
+[DHCP]
+RouteMetric=100
+UseMTU=true
+'''})
+        self.assert_networkd_udev(None)
+
+    def test_activation_mode_manual(self):
+        self.generate('''network:
+  version: 2
+  ethernets:
+    eth0:
+      dhcp6: true
+      activation-mode: manual''')
+        self.assert_networkd({'eth0.network': '''[Match]
+Name=eth0
+
+[Link]
+ActivationPolicy=manual
+RequiredForOnline=no
+
+[Network]
+DHCP=ipv6
+LinkLocalAddressing=ipv6
+
+[DHCP]
+RouteMetric=100
+UseMTU=true
+'''})
+        self.assert_networkd_udev(None)
+
     def test_mtu_all(self):
         self.generate(textwrap.dedent("""
             network:
@@ -507,14 +555,48 @@ RouteMetric=100
 UseMTU=true
 '''})
 
-    def test_gateway(self):
+    def test_gateway4(self):
+        err = self.generate('''network:
+  version: 2
+  ethernets:
+    engreen:
+      addresses: ["192.168.14.2/24"]
+      gateway4: 192.168.14.1''')
+        self.assertIn("`gateway4` has been deprecated, use default routes instead.", err)
+        self.assert_networkd({'engreen.network': '''[Match]
+Name=engreen
+
+[Network]
+LinkLocalAddressing=ipv6
+Address=192.168.14.2/24
+Gateway=192.168.14.1
+'''})
+
+    def test_gateway6(self):
+        err = self.generate('''network:
+  version: 2
+  ethernets:
+    engreen:
+      addresses: ["2001:FFfe::1/64"]
+      gateway6: 2001:FFfe::2''')
+        self.assertIn("`gateway6` has been deprecated, use default routes instead.", err)
+        self.assert_networkd({'engreen.network': '''[Match]
+Name=engreen
+
+[Network]
+LinkLocalAddressing=ipv6
+Address=2001:FFfe::1/64
+Gateway=2001:FFfe::2
+'''})
+
+    def test_gateway_full(self):
         self.generate('''network:
   version: 2
   ethernets:
     engreen:
       addresses: ["192.168.14.2/24", "2001:FFfe::1/64"]
       gateway4: 192.168.14.1
-      gateway6: 2001:FFfe::2''')
+      gateway6: "2001:FFfe::2"''')
 
         self.assert_networkd({'engreen.network': '''[Match]
 Name=engreen
@@ -526,6 +608,33 @@ Address=2001:FFfe::1/64
 Gateway=192.168.14.1
 Gateway=2001:FFfe::2
 '''})
+
+    def test_gateways_multi_pass(self):
+        self.generate('''network:
+  version: 2
+  bridges:
+    br0:
+      interfaces: [engreen]
+  ethernets:
+    engreen:
+      addresses: ["192.168.14.2/24", "2001:FFfe::1/64"]
+      gateway4: 192.168.14.1
+      gateway6: "2001:FFfe::2"''')
+
+        self.assert_networkd({
+            'engreen.network': '''[Match]
+Name=engreen
+
+[Network]
+LinkLocalAddressing=no
+Address=192.168.14.2/24
+Address=2001:FFfe::1/64
+Gateway=192.168.14.1
+Gateway=2001:FFfe::2
+Bridge=br0
+''',
+            'br0.network': ND_EMPTY % ('br0', 'ipv6'),
+            'br0.netdev': '[NetDev]\nName=br0\nKind=bridge\n'})
 
     def test_nameserver(self):
         self.generate('''network:
@@ -767,6 +876,40 @@ method=link-local
 method=ignore
 ''',
         })
+
+    def test_activation_mode_off(self):
+        self.generate('''network:
+  version: 2
+  renderer: NetworkManager
+  ethernets:
+    eth0:
+      activation-mode: off''', expect_fail=True)
+
+    def test_activation_mode_manual(self):
+        self.generate('''network:
+  version: 2
+  renderer: NetworkManager
+  ethernets:
+    eth0:
+      activation-mode: manual''')
+
+        self.assert_nm({'eth0': '''[connection]
+id=netplan-eth0
+type=ethernet
+autoconnect=false
+interface-name=eth0
+
+[ethernet]
+wake-on-lan=0
+
+[ipv4]
+method=link-local
+
+[ipv6]
+method=ignore
+'''})
+        self.assert_networkd({})
+        self.assert_nm_udev(None)
 
     def test_ipv6_mtu(self):
         self.generate(textwrap.dedent("""
@@ -1268,7 +1411,10 @@ Bond=bond0
     eth2:
       match:
         name: eth2
-''')
+''', skip_generated_yaml_validation=True)
+        # XXX: We need to skeip the generated YAML validation, as the pyYAML
+        #      parser overrides the duplicate "ethernets"/"bridges" keys, while
+        #      the netplan C YAML parser merges them into the netdef
 
         self.assert_networkd({'vlan1.netdev': '[NetDev]\nName=vlan1\nKind=vlan\n\n'
                                               '[VLAN]\nId=1\n',
@@ -1448,7 +1594,10 @@ unmanaged-devices+=interface-name:engreen,''')
   bridges:
     br0:
       interfaces: [eno1, switchports]
-      dhcp4: true'''})
+      dhcp4: true'''}, skip_generated_yaml_validation=True)
+        # XXX: We need to skip the generated YAML validation, as the 'bridges'
+        #      conf is invalid in itself (missing eno1 & switchports defs) and
+        #      can only be parsed if merged with the main YAML
 
         self.assert_networkd({'br0.netdev': '[NetDev]\nName=br0\nKind=bridge\n',
                               'br0.network': '''[Match]

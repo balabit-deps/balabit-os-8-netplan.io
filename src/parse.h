@@ -89,6 +89,7 @@ typedef enum {
     NETPLAN_ADDRGEN_DEFAULT,
     NETPLAN_ADDRGEN_EUI64,
     NETPLAN_ADDRGEN_STABLEPRIVACY,
+    NETPLAN_ADDRGEN_MAX,
 } NetplanAddrGenMode;
 
 struct NetplanOptionalAddressType {
@@ -164,6 +165,7 @@ typedef enum {
     NETPLAN_AUTH_KEY_MANAGEMENT_WPA_PSK,
     NETPLAN_AUTH_KEY_MANAGEMENT_WPA_EAP,
     NETPLAN_AUTH_KEY_MANAGEMENT_8021X,
+    NETPLAN_AUTH_KEY_MANAGEMENT_MAX,
 } NetplanAuthKeyManagementType;
 
 typedef enum {
@@ -171,6 +173,7 @@ typedef enum {
     NETPLAN_AUTH_EAP_TLS,
     NETPLAN_AUTH_EAP_PEAP,
     NETPLAN_AUTH_EAP_TTLS,
+    NETPLAN_AUTH_EAP_METHOD_MAX,
 } NetplanAuthEAPMethod;
 
 typedef struct missing_node {
@@ -246,7 +249,6 @@ struct net_definition {
     NetplanDefType type;
     NetplanBackend backend;
     char* id;
-    char* filename;
     /* only necessary for NetworkManager connection UUIDs in some cases */
     uuid_t uuid;
 
@@ -376,7 +378,6 @@ struct net_definition {
         char *private_key; /* used for wireguard */
         guint fwmark;
         guint port;
-        guint ttl;
     } tunnel;
 
     NetplanAuthenticationSettings auth;
@@ -393,6 +394,13 @@ struct net_definition {
     NetplanOVSSettings ovs_settings;
 
     NetplanBackendSettings backend_settings;
+
+    char* filename;
+    /* it cannot be in the tunnel struct: https://github.com/canonical/netplan/pull/206 */
+    guint tunnel_ttl;
+  
+    /* netplan-feature: activation-mode */
+    char* activation_mode;  
 };
 
 typedef enum {

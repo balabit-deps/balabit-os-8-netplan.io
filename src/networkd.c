@@ -142,8 +142,8 @@ write_tunnel_params(GString* s, const NetplanNetDefinition* def)
         g_string_append_printf(params, "Mode=%s\n", tunnel_mode_to_string(def->tunnel.mode));
     g_string_append_printf(params, "Local=%s\n", def->tunnel.local_ip);
     g_string_append_printf(params, "Remote=%s\n", def->tunnel.remote_ip);
-    if (def->tunnel.ttl)
-        g_string_append_printf(params, "TTL=%u\n", def->tunnel.ttl);
+    if (def->tunnel_ttl)
+        g_string_append_printf(params, "TTL=%u\n", def->tunnel_ttl);
     if (def->tunnel.input_key)
         g_string_append_printf(params, "InputKey=%s\n", def->tunnel.input_key);
     if (def->tunnel.output_key)
@@ -422,9 +422,14 @@ write_netdev_file(const NetplanNetDefinition* def, const char* rootdir, const ch
 static void
 write_route(NetplanIPRoute* r, GString* s)
 {
+    const char *to;
     g_string_append_printf(s, "\n[Route]\n");
 
-    g_string_append_printf(s, "Destination=%s\n", r->to);
+    if (g_strcmp0(r->to, "default") == 0)
+        to = get_global_network(r->family);
+    else
+        to = r->to;
+    g_string_append_printf(s, "Destination=%s\n", to);
 
     if (r->via)
         g_string_append_printf(s, "Gateway=%s\n", r->via);
@@ -549,6 +554,7 @@ write_network_file(const NetplanNetDefinition* def, const char* rootdir, const c
     GString* link = NULL;
     GString* s = NULL;
     mode_t orig_umask;
+    gboolean is_optional = def->optional;
 
     if (def->type == NETPLAN_DEF_TYPE_VLAN && def->sriov_vlan_filter) {
         g_debug("%s is defined as a hardware SR-IOV filtered VLAN, postponing creation", def->id);
@@ -561,8 +567,23 @@ write_network_file(const NetplanNetDefinition* def, const char* rootdir, const c
     /* Prepare the [Network] section */
     network = g_string_sized_new(200);
 
-    if (def->optional || def->optional_addresses) {
-        if (def->optional) {
+    /* The ActivationPolicy setting is available in systemd v248+ */
+    if (def->activation_mode) {
+        const char* mode;
+        if (g_strcmp0(def->activation_mode, "manual") == 0)
+            mode = "manual";
+        else /* "off" */
+            mode = "always-down";
+        g_string_append_printf(link, "ActivationPolicy=%s\n", mode);
+        /* When activation-mode is used we default to being optional.
+         * Otherwise systemd might wait indefinitely for the interface to
+         * become online.
+         */
+        is_optional = TRUE;
+    }
+
+    if (is_optional || def->optional_addresses) {
+        if (is_optional) {
             g_string_append(link, "RequiredForOnline=no\n");
         }
         for (unsigned i = 0; NETPLAN_OPTIONAL_ADDRESS_TYPES[i].name != NULL; ++i) {
@@ -825,6 +846,8 @@ append_wpa_auth_conf(GString* s, const NetplanAuthenticationSettings* auth, cons
         case NETPLAN_AUTH_KEY_MANAGEMENT_8021X:
             g_string_append(s, "  key_mgmt=IEEE8021X\n");
             break;
+
+        default: break; // LCOV_EXCL_LINE
     }
 
     switch (auth->eap_method) {
@@ -842,6 +865,8 @@ append_wpa_auth_conf(GString* s, const NetplanAuthenticationSettings* auth, cons
         case NETPLAN_AUTH_EAP_TTLS:
             g_string_append(s, "  eap=TTLS\n");
             break;
+
+        default: break; // LCOV_EXCL_LINE
     }
 
     if (auth->identity) {
