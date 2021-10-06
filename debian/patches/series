@@ -4,3 +4,5 @@
 0003-Mute-gateway4-6-deprecation-warnings.patch
 autopkgtest-fixes.patch
 nm-1.32.10-compat.patch
+0005-Implement-YAML-state-tracking-and-use-it-in-the-DBus.patch
+0006-netplan-set-make-it-possible-to-unset-a-whole-devtyp.patch

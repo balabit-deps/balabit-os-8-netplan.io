@@ -1,3 +1,17 @@
+netplan.io (0.103-0ubuntu5~20.04.2) focal; urgency=medium
+
+  * Backport patches from impish:
+    + Add d/p/0006-netplan-set-make-it-possible-to-unset-a-whole-devtyp.patch:
+      Fix unset of a devtype subtree, e.g. "netplan set network.ethernets=null"
+      (LP: #1942930)
+    + Add d/p/0005-Implement-YAML-state-tracking-and-use-it-in-the-DBus.patch:
+      Allow to pass a state to netplan apply/try so it can cleanup unused
+      virtual network interfaces after itself. Make use of this functionality
+      inside the DBus Config.Try()/Apply() API and the 'netplan try' CLI.
+      (LP: #1943120)
+
+ -- Simon Chopin <simon.chopin@canonical.com>  Wed, 06 Oct 2021 12:57:35 +0200
+
 netplan.io (0.103-0ubuntu5~20.04.1) focal; urgency=medium
 
   * Backport netplan.io 0.103-0ubuntu5 to 20.04 (LP: #1938920)
