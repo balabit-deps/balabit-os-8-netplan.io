@@ -1,0 +1,78 @@
+From: =?utf-8?q?Lukas_M=C3=A4rdian?= <slyon@ubuntu.com>
+Date: Thu, 4 Nov 2021 13:03:29 +0100
+Subject: cli:apply: initialize self.state (LP: #1949104) (#243)
+
+* cli:apply: initialize self.state
+
+The attribute needs to be available even if NetplanApply() is not executed via
+the commandline (and thus the run() method is not executed).
+
+* tests:regressions: Integration tests for 'netplan try' accept/reject cases
+---
+ netplan/cli/commands/apply.py    |  1 +
+ tests/integration/regressions.py | 32 ++++++++++++++++++++++++++++++++
+ 2 files changed, 33 insertions(+)
+
+diff --git a/netplan/cli/commands/apply.py b/netplan/cli/commands/apply.py
+index 477bc2f..4cd5379 100644
+--- a/netplan/cli/commands/apply.py
++++ b/netplan/cli/commands/apply.py
+@@ -42,6 +42,7 @@ class NetplanApply(utils.NetplanCommand):
+                          leaf=True)
+         self.sriov_only = False
+         self.only_ovs_cleanup = False
++        self.state = None  # to be filled by the '--state' argument
+ 
+     def run(self):  # pragma: nocover (covered in autopkgtest)
+         self.parser.add_argument('--sriov-only', action='store_true',
+diff --git a/tests/integration/regressions.py b/tests/integration/regressions.py
+index 25e9a2d..5295087 100644
+--- a/tests/integration/regressions.py
++++ b/tests/integration/regressions.py
+@@ -22,7 +22,9 @@
+ # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 
+ import sys
++import signal
+ import subprocess
++import time
+ import unittest
+ 
+ from base import IntegrationTestsBase, test_backends
+@@ -80,6 +82,36 @@ class TestNetworkd(IntegrationTestsBase, _CommonTests):
+         with open('/sys/class/net/mybond/bonding/slaves') as f:
+             self.assertIn(self.dev_e_client, f.read().strip())
+ 
++    def test_try_accept_lp1949095(self):
++        with open(self.config, 'w') as f:
++            f.write('''network:
++  renderer: %(r)s
++  version: 2''' % {'r': self.backend})
++        p = subprocess.Popen(['netplan', 'try'], stdout=subprocess.PIPE, universal_newlines=True)
++        time.sleep(0.5)
++        p.send_signal(signal.SIGUSR1)
++        out, err = p.communicate()
++        self.assertEqual(None, err)
++        self.assertRegex(out.strip(), r'Do you want to keep these settings\?\n\n\n'
++r'Press ENTER before the timeout to accept the new configuration\n\n\n'
++r'(Changes will revert in \d+ seconds\n)+'
++r'Configuration accepted\.')
++
++    def test_try_reject_lp1949095(self):
++        with open(self.config, 'w') as f:
++            f.write('''network:
++  renderer: %(r)s
++  version: 2''' % {'r': self.backend})
++        p = subprocess.Popen(['netplan', 'try'], stdout=subprocess.PIPE, universal_newlines=True)
++        time.sleep(0.5)
++        p.send_signal(signal.SIGINT)
++        out, err = p.communicate()
++        self.assertEqual(None, err)
++        self.assertRegex(out.strip(), r'Do you want to keep these settings\?\n\n\n'
++r'Press ENTER before the timeout to accept the new configuration\n\n\n'
++r'(Changes will revert in \d+ seconds\n)+'
++r'Reverting\.')
++
+ 
+ @unittest.skipIf("NetworkManager" not in test_backends,
+                      "skipping as NetworkManager backend tests are disabled")

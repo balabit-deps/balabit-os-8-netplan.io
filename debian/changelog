@@ -1,3 +1,22 @@
+netplan.io (0.103-0ubuntu5~20.04.3) focal; urgency=medium
+
+  [ Nicolas Bock ]
+  * d/p/0001-Add-support-for-additional-Link-options-225-LP-17717.patch:
+    - Add offload configuration options.
+      (LP: #1771740)
+  * Add d/p/partial-d4884cfd40e1e33540b274371c3272df6595d22c.patch:
+    - Partial application of d4884cfd40e1e33540b274371c3272df6595d22c in order
+      preserve ABI compatibility for future updates.
+
+  [ Lukas Märdian ]
+  * Add d/p/0010-parse-nm-Handle-missing-gateway-in-keyfile-routes-ke.patch
+    (LP: #1949761)
+  * Fix regression in 'netplan try' (LP: #1949104)
+    + d/p/lp1949104/cli-apply-initialize-self.state-LP-1949104-243.patch
+    + d/p/lp1949104/tests-regressions-make-netplan_try-autopkgtest-more-.patch
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Fri, 05 Nov 2021 15:15:57 +0100
+
 netplan.io (0.103-0ubuntu5~20.04.2) focal; urgency=medium
 
   * Backport patches from impish:

@@ -1,0 +1,434 @@
+From: =?utf-8?q?Lukas_M=C3=A4rdian?= <slyon@ubuntu.com>
+Date: Mon, 11 Oct 2021 17:52:36 +0200
+Subject: parse-nm: Handle missing gateway in keyfile routes,
+ keep dns-search fallback (#238)
+
+* parse-nm: Handle missing gateway in keyfile routes, keep dns-search fallback
+
+NM assumes a route to use the unspecified address as the gateway
+(via = "0.0.0.0"/"::") if none is specified in the keyfile.
+E.g. the route is only valid on the local network:
+"ip route add NETWORK dev DEVICE [metric METRIC]"
+
+netplan cannot differentiate between ipv4.dns-search and ipv6.dns-search
+so keep it in the passthrough/fallback list as an override.
+
+* parse-nm: Fix typos
+
+Co-authored-by: Simon Chopin <simon.chopin@canonical.com>
+
+* nm:parse-nm: Hide NM's automatic route-scope detection
+
+NetworkManager automatically detects a route's scope, depending on
+destination IP ("to") and gateway ("via"). If no gateway is specified
+(e.g. the unspecified address "0.0.0.0"/"::" in keyfile) it will assume
+a "link"/"host" scope, otherwise it will assume a "global" scope.
+
+* nm: Do not set missing gateway as unspecified address
+
+Also avoid the deprecated trailing comma notation at the same time.
+
+Co-authored-by: Simon Chopin <simon.chopin@canonical.com>
+---
+ doc/netplan.md                  |   3 +-
+ src/nm.c                        |  24 ++++-----
+ src/parse-nm.c                  |  21 ++++++--
+ src/util.c                      |   7 +++
+ src/util.h                      |   1 +
+ tests/generator/test_routing.py |  17 ------
+ tests/integration/routing.py    |  10 ++--
+ tests/parser/base.py            |  10 ++--
+ tests/parser/test_keyfile.py    | 117 ++++++++++++++++++++++++++++++++++++++++
+ 9 files changed, 161 insertions(+), 49 deletions(-)
+
+diff --git a/doc/netplan.md b/doc/netplan.md
+index 368cffb..39b9778 100644
+--- a/doc/netplan.md
++++ b/doc/netplan.md
+@@ -656,8 +656,7 @@ eth1:
+ 
+      ``scope`` (scalar)
+      :    The route scope, how wide-ranging it is to the network. Possible
+-          values are "global", "link", or "host". ``NetworkManager`` does
+-          not support setting a scope.
++          values are "global", "link", or "host".
+ 
+      ``table`` (scalar)
+      :    The table number to use for the route. In some scenarios, it may be
+diff --git a/src/nm.c b/src/nm.c
+index aef15ac..f5a09a1 100644
+--- a/src/nm.c
++++ b/src/nm.c
+@@ -231,22 +231,18 @@ write_routes(const NetplanNetDefinition* def, GKeyFile *kf, int family)
+                 exit(1);
+             }
+ 
+-            if (!g_strcmp0(cur_route->scope, "global")) {
+-                /* For IPv6 addresses, kernel and NetworkManager don't support a scope.
+-                 * For IPv4 addresses, NetworkManager determines the scope of addresses on its own
+-                 * ("link" for addresses without gateway, "global" for addresses with next-hop). */
+-                g_debug("%s: NetworkManager does not support setting a scope for routes, it will auto-detect them.", def->id);
+-            } else if (cur_route->scope) {
+-                /* Error out if scope is not set to its default value of 'global' */
+-                g_fprintf(stderr, "ERROR: %s: NetworkManager does not support setting a scope for routes\n", def->id);
+-                exit(1);
+-            }
+-
++            /* For IPv6 addresses, kernel and NetworkManager don't support a scope.
++             * For IPv4 addresses, NetworkManager determines the scope of addresses on its own
++             * ("link"/"host" for addresses without gateway, "global" for addresses with next-hop).
++             * No gateway is represented as missing, empty or unspecified address in keyfile. */
++            gboolean is_global = (g_strcmp0(cur_route->scope, "global") == 0);
+             tmp_key = g_strdup_printf("route%d", j);
+-            tmp_val = g_string_new(NULL);
+-            g_string_printf(tmp_val, "%s,%s", destination, cur_route->via);
++            tmp_val = g_string_new(destination);
+             if (cur_route->metric != NETPLAN_METRIC_UNSPEC)
+-                g_string_append_printf(tmp_val, ",%d", cur_route->metric);
++                g_string_append_printf(tmp_val, ",%s,%d", is_global ? cur_route->via : "",
++                                       cur_route->metric);
++            else if (is_global) // no metric, but global gateway
++                g_string_append_printf(tmp_val, ",%s", cur_route->via);
+             g_key_file_set_string(kf, group, tmp_key, tmp_val->str);
+             g_free(tmp_key);
+             g_string_free(tmp_val, TRUE);
+diff --git a/src/parse-nm.c b/src/parse-nm.c
+index bf998b7..8579aef 100644
+--- a/src/parse-nm.c
++++ b/src/parse-nm.c
+@@ -207,7 +207,6 @@ parse_routes(GKeyFile* kf, const gchar* group, GArray** routes_arr)
+             *routes_arr = g_array_new(FALSE, TRUE, sizeof(NetplanIPRoute*));
+         route = g_new0(NetplanIPRoute, 1);
+         route->type = g_strdup("unicast");
+-        route->scope = g_strdup("global");
+         route->family = G_MAXUINT; /* 0 is a valid family ID */
+         route->metric = NETPLAN_METRIC_UNSPEC; /* 0 is a valid metric */
+         g_debug("%s: adding new route (kf)", key);
+@@ -222,8 +221,18 @@ parse_routes(GKeyFile* kf, const gchar* group, GArray** routes_arr)
+         if (split[0])
+             route->to = g_strdup(split[0]); //no need to free, will stay in netdef
+         /* Append gateway/via IP */
+-        if (split[0] && split[1])
++        if (split[0] && split[1] &&
++            g_strcmp0(split[1], get_unspecified_address(route->family)) != 0) {
++            route->scope = g_strdup("global");
+             route->via = g_strdup(split[1]); //no need to free, will stay in netdef
++        } else {
++            /* If the gateway (via) is unspecified, it means that this route is
++             * only valid on the local network (see nm-keyfile.c ->
++             * read_one_ip_address_or_route()), e.g.:
++             * ip route add NETWORK dev DEV [metric METRIC] */
++            route->scope = g_strdup("link");
++        }
++
+         /* Append metric */
+         if (split[0] && split[1] && split[2] && strtoul(split[2], NULL, 10) != NETPLAN_METRIC_UNSPEC)
+             route->metric = strtoul(split[2], NULL, 10);
+@@ -285,12 +294,15 @@ parse_dhcp_overrides(GKeyFile* kf, const gchar* group, NetplanDHCPOverrides* dat
+ static void
+ parse_search_domains(GKeyFile* kf, const gchar* group, GArray** domains_arr)
+ {
++    /* Keep "dns-search" as fallback/passthrough, as netplan cannot
++     * differentiate between ipv4.dns-search and ipv6.dns-search */
+     g_assert(domains_arr);
+     gsize len = 0;
+     gchar **split = g_key_file_get_string_list(kf, group, "dns-search", &len, NULL);
+     if (split) {
+         if (len == 0) {
+-            _kf_clear_key(kf, group, "dns-search");
++            //do not clear "dns-search", keep as fallback
++            //_kf_clear_key(kf, group, "dns-search");
+             return;
+         }
+         if (!*domains_arr)
+@@ -299,7 +311,8 @@ parse_search_domains(GKeyFile* kf, const gchar* group, GArray** domains_arr)
+             char* s = g_strdup(split[i]); //no need to free, will stay in netdef
+             g_array_append_val(*domains_arr, s);
+         }
+-        _kf_clear_key(kf, group, "dns-search");
++        //do not clear "dns-search", keep as fallback
++        //_kf_clear_key(kf, group, "dns-search");
+         g_strfreev(split);
+     }
+ }
+diff --git a/src/util.c b/src/util.c
+index ef695ab..dc6fff8 100644
+--- a/src/util.c
++++ b/src/util.c
+@@ -328,6 +328,13 @@ get_global_network(int ip_family)
+         return "::/0";
+ }
+ 
++const char *
++get_unspecified_address(int ip_family)
++{
++    g_assert(ip_family == AF_INET || ip_family == AF_INET6);
++    return (ip_family == AF_INET) ? "0.0.0.0" : "::";
++}
++
+ #define ENUM_FUNCTION(_radical, _type) _type netplan_ ## _radical ## _from_name(const char* val) \
+ { \
+     for (int i = 0; i < sizeof(netplan_ ## _radical ## _to_str); ++i) { \
+diff --git a/src/util.h b/src/util.h
+index f34c601..0955e20 100644
+--- a/src/util.h
++++ b/src/util.h
+@@ -28,6 +28,7 @@ void unlink_glob(const char* rootdir, const char* _glob);
+ int find_yaml_glob(const char* rootdir, glob_t* out_glob);
+ 
+ const char *get_global_network(int ip_family);
++const char *get_unspecified_address(int ip_family);
+ 
+ int wifi_get_freq24(int channel);
+ int wifi_get_freq5(int channel);
+diff --git a/tests/generator/test_routing.py b/tests/generator/test_routing.py
+index 9b302a9..247f7ae 100644
+--- a/tests/generator/test_routing.py
++++ b/tests/generator/test_routing.py
+@@ -1185,23 +1185,6 @@ method=ignore
+ '''})
+         self.assert_networkd({})
+ 
+-    def test_route_reject_scope(self):
+-        out = self.generate('''network:
+-  version: 2
+-  ethernets:
+-    engreen:
+-      renderer: NetworkManager
+-      addresses: ["192.168.14.2/24"]
+-      routes:
+-        - to: 10.10.10.0/24
+-          via: 192.168.1.20
+-          scope: host
+-          ''', expect_fail=True)
+-        self.assertIn('ERROR: engreen: NetworkManager does not support setting a scope for routes', out)
+-
+-        self.assert_nm({})
+-        self.assert_networkd({})
+-
+     def test_route_reject_type(self):
+         err = self.generate('''network:
+   version: 2
+diff --git a/tests/integration/routing.py b/tests/integration/routing.py
+index d2b3075..69f347e 100644
+--- a/tests/integration/routing.py
++++ b/tests/integration/routing.py
+@@ -254,11 +254,6 @@ class _CommonTests():
+         self.assertIn(b'initrwnd 16',  # check initrwnd from static route
+                       subprocess.check_output(['ip', 'route', 'show', '10.10.10.0/24']))
+ 
+-@unittest.skipIf("networkd" not in test_backends,
+-                     "skipping as networkd backend tests are disabled")
+-class TestNetworkd(IntegrationTestsBase, _CommonTests):
+-    backend = 'networkd'
+-
+     def test_link_route_v4(self):
+         self.setup_eth(None)
+         with open(self.config, 'w') as f:
+@@ -282,6 +277,11 @@ class TestNetworkd(IntegrationTestsBase, _CommonTests):
+         self.assertIn(b'metric 99',  # check metric from static route
+                       subprocess.check_output(['ip', 'route', 'show', '10.10.10.0/24']))
+ 
++@unittest.skipIf("networkd" not in test_backends,
++                     "skipping as networkd backend tests are disabled")
++class TestNetworkd(IntegrationTestsBase, _CommonTests):
++    backend = 'networkd'
++
+     @unittest.skip("networkd does not handle non-unicast routes correctly yet (Invalid argument)")
+     def test_route_type_blackhole(self):
+         self.setup_eth(None)
+diff --git a/tests/parser/base.py b/tests/parser/base.py
+index 0ba40f6..2150f82 100644
+--- a/tests/parser/base.py
++++ b/tests/parser/base.py
+@@ -131,17 +131,13 @@ class TestKeyfileBase(unittest.TestCase):
+                 # Normalize lines
+                 if k == 'addr-gen-mode':
+                     v = v.replace('1', 'stable-privacy').replace('0', 'eui64')
+-                elif k == 'dns-search' and v != '':
+-                    # XXX: netplan is loosing information here about which search domain
+-                    #      belongs to the [ipv4] or [ipv6] sections
+-                    v = '*** REDACTED (in base.py) ***'
+-                # handle NM defaults
+-                elif k == 'dns-search' and v == '':
+-                    continue
+                 elif k == 'wake-on-lan' and v == '1':
+                     continue
+                 elif k == 'stp' and v == 'true':
+                     continue
++                elif k.startswith('route'):
++                    v = v.replace(',::', ',').replace(',0.0.0.0', ',')
++                    v = v.strip(',')
+ 
+                 line = (k + '=' + v).strip(';')
+                 res.append(line)
+diff --git a/tests/parser/test_keyfile.py b/tests/parser/test_keyfile.py
+index 692dba4..ba13003 100644
+--- a/tests/parser/test_keyfile.py
++++ b/tests/parser/test_keyfile.py
+@@ -92,6 +92,8 @@ method=auto
+         name: "T-Mobile Funkadelic 2"
+         passthrough:
+           gsm.home-only: "true"
++          ipv4.dns-search: ""
++          ipv6.dns-search: ""
+ '''.format(UUID, UUID)})
+ 
+     def test_keyfile_cdma(self):
+@@ -231,6 +233,8 @@ route-metric=4242
+         uuid: "{}"
+         name: "Test"
+         passthrough:
++          ipv4.dns-search: ""
++          ipv6.dns-search: ""
+           proxy._: ""
+ '''.format(UUID, UUID)})
+ 
+@@ -308,8 +312,10 @@ route1_options=unknown=invalid,
+         uuid: "{}"
+         name: "Test"
+         passthrough:
++          ipv4.dns-search: "foo.local;bar.remote;"
+           ipv4.method: "manual"
+           ipv4.address1: "1.2.3.4/24,8.8.8.8"
++          ipv6.dns-search: "bar.local"
+           ipv6.route1: "dead:beef::1/128,2001:1234::2"
+           ipv6.route1_options: "unknown=invalid,"
+           proxy._: ""
+@@ -412,6 +418,7 @@ dns-search='''.format(UUID))
+             name: "myid with spaces"
+             passthrough:
+               connection.permissions: ""
++              ipv4.dns-search: ""
+       networkmanager:
+         uuid: "{}"
+         name: "myid with spaces"
+@@ -472,6 +479,7 @@ dns-search='''.format(UUID, method))
+             name: "testnet"
+             passthrough:
+               connection.permissions: ""
++              ipv4.dns-search: ""
+       networkmanager:
+         uuid: "{}"
+         name: "testnet"
+@@ -718,7 +726,9 @@ psk=test1234
+             passthrough:
+               connection.autoconnect: "false"
+               connection.permissions: ""
++              ipv4.dns-search: ""
+               ipv6.addr-gen-mode: "1"
++              ipv6.dns-search: ""
+               wifi.mac-address-blacklist: ""
+               wifi-security.group: "ccmp;"
+               wifi-security.pairwise: "ccmp;"
+@@ -1016,3 +1026,110 @@ addr-gen-mode=1
+           ipv4.address3: "10.10.246.132/24"
+           ipv6.addr-gen-mode: "1"
+ '''.format(UUID, UUID)})
++
++    def test_keyfile_netplan0103_compat(self):
++        self.generate_from_keyfile('''[connection]
++id=Work Wired
++uuid={}
++type=ethernet
++autoconnect=false
++permissions=
++timestamp=305419896
++
++[ethernet]
++mac-address=99:88:77:66:55:44
++mac-address-blacklist=
++mtu=900
++
++[ipv4]
++address1=192.168.0.5/24,192.168.0.1
++address2=1.2.3.4/8
++dns=4.2.2.1;4.2.2.2;
++dns-search=
++method=manual
++route1=10.10.10.2/24,10.10.10.1,3
++route2=1.1.1.1/8,1.2.1.1,1
++route3=2.2.2.2/7
++route4=3.3.3.3/6,0.0.0.0,4
++route4_options=cwnd=10,mtu=1492,src=1.2.3.4
++
++[ipv6]
++addr-gen-mode=stable-privacy
++address1=abcd::beef/64
++address2=dcba::beef/56
++dns=1::cafe;2::cafe;
++dns-search=wallaceandgromit.com;
++method=manual
++route1=1:2:3:4:5:6:7:8/64,8:7:6:5:4:3:2:1,3
++route2=2001::1000/56,2001::1111,1
++route3=4:5:6:7:8:9:0:1/63,::,5
++route4=5:6:7:8:9:0:1:2/62
++
++[proxy]
++
++
++'''.format(UUID))
++        self.assert_netplan({UUID: '''network:
++  version: 2
++  ethernets:
++    NM-{}:
++      renderer: NetworkManager
++      match:
++        macaddress: "99:88:77:66:55:44"
++      addresses:
++      - "192.168.0.5/24"
++      - "1.2.3.4/8"
++      - "abcd::beef/64"
++      - "dcba::beef/56"
++      nameservers:
++        addresses:
++        - 4.2.2.1
++        - 4.2.2.2
++        - 1::cafe
++        - 2::cafe
++        search:
++        - wallaceandgromit.com
++      ipv6-address-generation: "stable-privacy"
++      mtu: 900
++      routes:
++      - metric: 3
++        to: "10.10.10.2/24"
++        via: "10.10.10.1"
++      - metric: 1
++        to: "1.1.1.1/8"
++        via: "1.2.1.1"
++      - scope: "link"
++        to: "2.2.2.2/7"
++      - scope: "link"
++        metric: 4
++        mtu: 1492
++        from: "1.2.3.4"
++        to: "3.3.3.3/6"
++      - metric: 3
++        to: "1:2:3:4:5:6:7:8/64"
++        via: "8:7:6:5:4:3:2:1"
++      - metric: 1
++        to: "2001::1000/56"
++        via: "2001::1111"
++      - scope: "link"
++        metric: 5
++        to: "4:5:6:7:8:9:0:1/63"
++      - scope: "link"
++        to: "5:6:7:8:9:0:1:2/62"
++      wakeonlan: true
++      networkmanager:
++        uuid: "{}"
++        name: "Work Wired"
++        passthrough:
++          connection.autoconnect: "false"
++          connection.permissions: ""
++          connection.timestamp: "305419896"
++          ethernet.mac-address-blacklist: ""
++          ipv4.address1: "192.168.0.5/24,192.168.0.1"
++          ipv4.dns-search: ""
++          ipv4.method: "manual"
++          ipv4.route4: "3.3.3.3/6,0.0.0.0,4"
++          ipv4.route4_options: "cwnd=10,mtu=1492,src=1.2.3.4"
++          ipv6.dns-search: "wallaceandgromit.com;"
++          proxy._: ""
++'''.format(UUID, UUID)})

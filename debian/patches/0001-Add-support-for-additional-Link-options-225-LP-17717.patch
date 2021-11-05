@@ -1,0 +1,266 @@
+From 0b5dc8a6f80fb6bc6b12ad718cc3310f8be1f754 Mon Sep 17 00:00:00 2001
+From: Nicolas Bock <nicolas.bock@canonical.com>
+Date: Wed, 29 Sep 2021 02:35:08 -0600
+Subject: [PATCH 1/2] Add support for additional `Link` options (#225) (LP:
+ #1771740)
+
+This change adds systemd support for additional configuration options
+for interfaces.
+
+* ReceiveChecksumOffload
+* TransmitChecksumOffload
+* TCPSegmentationOffload
+* TCP6SegmentationOffload
+* GenericSegmentationOffload
+* GenericReceiveOffload
+* LargeReceiveOffload
+
+Closes: https://bugs.launchpad.net/netplan/+bug/1771740
+
+Signed-off-by: Nicolas Bock <nicolas.bock@canonical.com>
+---
+ doc/netplan.md                    | 42 +++++++++++++++++++++++++++++++
+ examples/offload.yaml             | 11 ++++++++
+ src/netplan.c                     | 22 ++++++++++++++++
+ src/networkd.c                    | 33 +++++++++++++++++++++++-
+ src/parse.c                       |  9 ++++++-
+ src/parse.h                       | 11 +++++++-
+ tests/generator/test_ethernets.py | 34 +++++++++++++++++++++++++
+ 7 files changed, 159 insertions(+), 3 deletions(-)
+ create mode 100644 examples/offload.yaml
+
+Index: netplan.io-0.103/doc/netplan.md
+===================================================================
+--- netplan.io-0.103.orig/doc/netplan.md
++++ netplan.io-0.103/doc/netplan.md
+@@ -141,6 +141,48 @@ Virtual devices
+ 
+ :    (networkd backend only) Whether to emit LLDP packets. Off by default.
+ 
++``receive-checksum-offload`` (bool) – since **0.104**
++
++:    (networkd backend only) If set to true, the hardware offload for
++     checksumming of ingress network packets is enabled. When unset,
++     the kernel's default will be used.
++
++``transmit-checksum-offload`` (bool) – since **0.104**
++
++:    (networkd backend only) If set to true, the hardware offload for
++     checksumming of egress network packets is enabled. When unset,
++     the kernel's default will be used.
++
++``tcp-segmentation-offload`` (bool) – since **0.104**
++
++:    (networkd backend only) If set to true, the TCP Segmentation
++     Offload (TSO) is enabled. When unset, the kernel's default will
++     be used.
++
++``tcp6-segmentation-offload`` (bool) – since **0.104**
++
++:    (networkd backend only) If set to true, the TCP6 Segmentation
++     Offload (tx-tcp6-segmentation) is enabled. When unset, the
++     kernel's default will be used.
++
++``generic-segmentation-offload`` (bool) – since **0.104**
++
++:    (networkd backend only) If set to true, the Generic Segmentation
++     Offload (GSO) is enabled. When unset, the kernel's default will
++     be used.
++
++``generic-receive-offload`` (bool) – since **0.104**
++
++:    (networkd backend only) If set to true, the Generic Receive
++     Offload (GRO) is enabled. When unset, the kernel's default will
++     be used.
++
++``large-receive-offload`` (bool) – since **0.104**
++
++:    (networkd backend only) If set to true, the Generic Receive
++     Offload (GRO) is enabled. When unset, the kernel's default will
++     be used.
++
+ ``openvswitch`` (mapping) – since **0.100**
+ 
+ :    This provides additional configuration for the network device for openvswitch.
+Index: netplan.io-0.103/examples/offload.yaml
+===================================================================
+--- /dev/null
++++ netplan.io-0.103/examples/offload.yaml
+@@ -0,0 +1,11 @@
++network:
++  version: 2
++  ethernets:
++    ens1:
++      receive-checksum-offload: false
++      transmit-checksum-offload: true
++      tcp-segmentation-offload: true
++      tcp6-segmentation-offload: true
++      generic-segmentation-offload: true
++      generic-receive-offload: true
++      large-receive-offload: true
+Index: netplan.io-0.103/src/netplan.c
+===================================================================
+--- netplan.io-0.103.orig/src/netplan.c
++++ netplan.io-0.103/src/netplan.c
+@@ -716,6 +716,28 @@ _serialize_yaml(yaml_event_t* event, yam
+     if (def->wake_on_lan)
+         YAML_STRING_PLAIN(event, emitter, "wakeonlan", "true");
+ 
++    /* Offload options */
++    if (def->receive_checksum_offload)
++        YAML_STRING_PLAIN(event, emitter, "receive-checksum-offload", "true");
++
++    if (def->transmit_checksum_offload)
++        YAML_STRING_PLAIN(event, emitter, "transmit-checksum-offload", "true");
++
++    if (def->tcp_segmentation_offload)
++        YAML_STRING_PLAIN(event, emitter, "tcp-segmentation-offload", "true");
++
++    if (def->tcp6_segmentation_offload)
++        YAML_STRING_PLAIN(event, emitter, "tcp6-segmentation-offload", "true");
++
++    if (def->generic_segmentation_offload)
++        YAML_STRING_PLAIN(event, emitter, "generic-segmentation-offload", "true");
++
++    if (def->generic_receive_offload)
++        YAML_STRING_PLAIN(event, emitter, "generic-receive-offload", "true");
++
++    if (def->large_receive_offload)
++        YAML_STRING_PLAIN(event, emitter, "large-receive-offload", "true");
++
+     if (def->wowlan && def->wowlan != NETPLAN_WIFI_WOWLAN_DEFAULT) {
+         YAML_SCALAR_PLAIN(event, emitter, "wakeonwlan");
+         YAML_SEQUENCE_OPEN(event, emitter);
+Index: netplan.io-0.103/src/networkd.c
+===================================================================
+--- netplan.io-0.103.orig/src/networkd.c
++++ netplan.io-0.103/src/networkd.c
+@@ -229,7 +229,16 @@ write_link_file(const NetplanNetDefiniti
+         return;
+ 
+     /* do we need to write a .link file? */
+-    if (!def->set_name && !def->wake_on_lan && !def->mtubytes)
++    if (!def->set_name &&
++        !def->wake_on_lan &&
++        !def->mtubytes &&
++        !def->receive_checksum_offload &&
++        !def->transmit_checksum_offload &&
++        !def->tcp_segmentation_offload &&
++        !def->tcp6_segmentation_offload &&
++        !def->generic_segmentation_offload &&
++        !def->generic_receive_offload &&
++        !def->large_receive_offload)
+         return;
+ 
+     /* build file contents */
+@@ -244,6 +253,28 @@ write_link_file(const NetplanNetDefiniti
+     if (def->mtubytes)
+         g_string_append_printf(s, "MTUBytes=%u\n", def->mtubytes);
+ 
++    /* Offload options */
++    if (def->receive_checksum_offload)
++        g_string_append_printf(s, "ReceiveChecksumOffload=%u\n", def->receive_checksum_offload);
++
++    if (def->transmit_checksum_offload)
++        g_string_append_printf(s, "TransmitChecksumOffload=%u\n", def->transmit_checksum_offload);
++
++    if (def->tcp_segmentation_offload)
++        g_string_append_printf(s, "TCPSegmentationOffload=%u\n", def->tcp_segmentation_offload);
++
++    if (def->tcp6_segmentation_offload)
++        g_string_append_printf(s, "TCP6SegmentationOffload=%u\n", def->tcp6_segmentation_offload);
++
++    if (def->generic_segmentation_offload)
++        g_string_append_printf(s, "GenericSegmentationOffload=%u\n", def->generic_segmentation_offload);
++
++    if (def->generic_receive_offload)
++        g_string_append_printf(s, "GenericReceiveOffload=%u\n", def->generic_receive_offload);
++
++    if (def->large_receive_offload)
++        g_string_append_printf(s, "LargeReceiveOffload=%u\n", def->large_receive_offload);
++
+     orig_umask = umask(022);
+     g_string_free_to_file(s, rootdir, path, ".link");
+     umask(orig_umask);
+Index: netplan.io-0.103/src/parse.c
+===================================================================
+--- netplan.io-0.103.orig/src/parse.c
++++ netplan.io-0.103/src/parse.c
+@@ -2293,7 +2293,14 @@ static const mapping_entry_handler dhcp6
+     {"set-name", YAML_SCALAR_NODE, handle_netdef_str, NULL, netdef_offset(set_name)},         \
+     {"wakeonlan", YAML_SCALAR_NODE, handle_netdef_bool, NULL, netdef_offset(wake_on_lan)},    \
+     {"wakeonwlan", YAML_SEQUENCE_NODE, handle_wowlan, NULL, netdef_offset(wowlan)},           \
+-    {"emit-lldp", YAML_SCALAR_NODE, handle_netdef_bool, NULL, netdef_offset(emit_lldp)}
++    {"emit-lldp", YAML_SCALAR_NODE, handle_netdef_bool, NULL, netdef_offset(emit_lldp)},      \
++    {"receive-checksum-offload", YAML_SCALAR_NODE, handle_netdef_bool, NULL, netdef_offset(receive_checksum_offload)}, \
++    {"transmit-checksum-offload", YAML_SCALAR_NODE, handle_netdef_bool, NULL, netdef_offset(transmit_checksum_offload)}, \
++    {"tcp-segmentation-offload", YAML_SCALAR_NODE, handle_netdef_bool, NULL, netdef_offset(tcp_segmentation_offload)}, \
++    {"tcp6-segmentation-offload", YAML_SCALAR_NODE, handle_netdef_bool, NULL, netdef_offset(tcp6_segmentation_offload)}, \
++    {"generic-segmentation-offload", YAML_SCALAR_NODE, handle_netdef_bool, NULL, netdef_offset(generic_segmentation_offload)}, \
++    {"generic-receive-offload", YAML_SCALAR_NODE, handle_netdef_bool, NULL, netdef_offset(generic_receive_offload)}, \
++    {"large-receive-offload", YAML_SCALAR_NODE, handle_netdef_bool, NULL, netdef_offset(large_receive_offload)}
+ 
+ static const mapping_entry_handler ethernet_def_handlers[] = {
+     COMMON_LINK_HANDLERS,
+Index: netplan.io-0.103/src/parse.h
+===================================================================
+--- netplan.io-0.103.orig/src/parse.h
++++ netplan.io-0.103/src/parse.h
+@@ -401,6 +401,15 @@ struct net_definition {
+   
+     /* netplan-feature: activation-mode */
+     char* activation_mode;  
++
++    /* offload options */
++    gboolean receive_checksum_offload;
++    gboolean transmit_checksum_offload;
++    gboolean tcp_segmentation_offload;
++    gboolean tcp6_segmentation_offload;
++    gboolean generic_segmentation_offload;
++    gboolean generic_receive_offload;
++    gboolean large_receive_offload;
+ };
+ 
+ typedef enum {
+Index: netplan.io-0.103/tests/generator/test_ethernets.py
+===================================================================
+--- netplan.io-0.103.orig/tests/generator/test_ethernets.py
++++ netplan.io-0.103/tests/generator/test_ethernets.py
+@@ -713,3 +713,37 @@ method=ignore
+ '''})
+         self.assert_networkd({})
+         self.assert_nm_udev(None)
++
++    def test_offload(self):
++        self.generate('''network:
++  version: 2
++  ethernets:
++    eth1:
++      receive-checksum-offload: true
++      transmit-checksum-offload: true
++      tcp-segmentation-offload: true
++      tcp6-segmentation-offload: true
++      generic-segmentation-offload: true
++      generic-receive-offload: true
++      large-receive-offload: true''')
++
++        self.assert_networkd({'eth1.link': '''[Match]
++OriginalName=eth1
++
++[Link]
++WakeOnLan=off
++ReceiveChecksumOffload=1
++TransmitChecksumOffload=1
++TCPSegmentationOffload=1
++TCP6SegmentationOffload=1
++GenericSegmentationOffload=1
++GenericReceiveOffload=1
++LargeReceiveOffload=1
++''',
++                              'eth1.network': '''[Match]
++Name=eth1
++
++[Network]
++LinkLocalAddressing=ipv6
++'''})
++        self.assert_networkd_udev(None)
