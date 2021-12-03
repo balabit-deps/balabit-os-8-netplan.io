@@ -1,3 +1,16 @@
+netplan.io (0.103-0ubuntu5~20.04.5) focal; urgency=medium
+
+  * Add d/p/give-some-more-time-for-dbus-test-on-focal-riscv64.diff
+    To make test_netplan_dbus_config_set_uninvalidate_timeout() pass in slow
+    environments (looking at you, riscv64)
+  * Add d/p/0012-test-bridge-base-give-bridge-some-more-time-to-reach.patch
+    To fix flaky test_bridge_anonymous autopkgtest (upstream c6ad8e6)
+  * Upstream cherry-picks for snapd dbus config set-try-apply integration fixes
+    - dbus-wait-for-netplan-try-to-be-ready-LP-1949893-245.patch (LP: #1949893)
+    - get-set-ignore-empty-YAML-hints-and-delete-files-on-.patch (LP: #1946957)
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Fri, 03 Dec 2021 11:12:19 +0100
+
 netplan.io (0.103-0ubuntu5~20.04.3) focal; urgency=medium
 
   [ Nicolas Bock ]

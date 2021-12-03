@@ -1,0 +1,45 @@
+Description: Give some more time for DBus test on focal/riscv64
+Author: Lukas Märdian <slyon@ubuntu.com>
+Origin: vendor, Ubuntu
+Forwarded: not-needed
+Last-Update: 2021-12-03
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- netplan.io-0.103.orig/tests/dbus/test_dbus.py
++++ netplan.io-0.103/tests/dbus/test_dbus.py
+@@ -748,7 +748,7 @@ class TestNetplanDBus(unittest.TestCase)
+ 
+     def test_netplan_dbus_config_set_uninvalidate_timeout(self):
+         self.mock_netplan_cmd.touch(self._netplan_try_stamp)
+-        self.mock_netplan_cmd.set_timeout(1)  # actually self-terminate process after 0.1 sec
++        self.mock_netplan_cmd.set_timeout(5)  # actually self-terminate process after 0.5 sec
+         cid = self._new_config_object()
+         cid2 = self._new_config_object()
+         BUSCTL_NETPLAN_CMD = [
+@@ -766,7 +766,7 @@ class TestNetplanDBus(unittest.TestCase)
+             "io.netplan.Netplan",
+             "/io/netplan/Netplan/config/{}".format(cid),
+             "io.netplan.Netplan.Config",
+-            "Try", "u", "1",
++            "Try", "u", "2",
+         ]
+         out = subprocess.check_output(BUSCTL_NETPLAN_CMD1)
+         self.assertEqual(b'b true\n', out)
+@@ -782,7 +782,7 @@ class TestNetplanDBus(unittest.TestCase)
+         err = self._check_dbus_error(BUSCTL_NETPLAN_CMD2)
+         self.assertIn('This config was invalidated by another config object', err)
+ 
+-        time.sleep(1.5)  # Wait for the child process to self-terminate
++        time.sleep(2.5)  # Wait for the child process to self-terminate
+ 
+         # Calling Set() on the other config object works now
+         out = subprocess.check_output(BUSCTL_NETPLAN_CMD2)
+@@ -792,7 +792,7 @@ class TestNetplanDBus(unittest.TestCase)
+         self.assertEquals(self.mock_netplan_cmd.calls(), [
+             ["netplan", "set", "ethernets.eth0.dhcp4=true", "--origin-hint=70-snapd",
+              "--root-dir={}/run/netplan/config-{}".format(self.tmp, cid)],
+-            ["netplan", "try", "--timeout=1", "--state=%s/run/netplan/config-BACKUP" % self.tmp],
++            ["netplan", "try", "--timeout=2", "--state=%s/run/netplan/config-BACKUP" % self.tmp],
+             ["netplan", "set", "ethernets.eth0.dhcp4=false", "--origin-hint=70-snapd",
+              "--root-dir={}/run/netplan/config-{}".format(self.tmp, cid2)]
+         ])
