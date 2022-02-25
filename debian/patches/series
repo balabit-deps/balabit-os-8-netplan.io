@@ -15,3 +15,4 @@ lp1949104/0002-tests-regressions-make-netplan_try-autopkgtest-more-.patch
 0013-dbus-wait-for-netplan-try-to-be-ready-LP-1949893-245.patch
 0014-get-set-ignore-empty-YAML-hints-and-delete-files-on-.patch
 give-some-more-time-for-dbus-test-on-focal-riscv64.diff
+0018-keyfile-do-not-try-to-write-out-unvalidated-YAML-LP-.patch

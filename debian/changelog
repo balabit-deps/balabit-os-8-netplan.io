@@ -1,3 +1,10 @@
+netplan.io (0.103-0ubuntu5~20.04.6) focal; urgency=medium
+
+  * Do not write unvalidated YAML, fixing NM ip-tunnel handling (LP: #1962297)
+    d/p/0018-keyfile-do-not-try-to-write-out-unvalidated-YAML-LP-.patch
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Fri, 25 Feb 2022 10:03:12 +0100
+
 netplan.io (0.103-0ubuntu5~20.04.5) focal; urgency=medium
 
   * Add d/p/give-some-more-time-for-dbus-test-on-focal-riscv64.diff

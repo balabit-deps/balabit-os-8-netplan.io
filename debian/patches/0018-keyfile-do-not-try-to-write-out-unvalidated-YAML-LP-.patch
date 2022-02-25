@@ -1,0 +1,320 @@
+From: =?utf-8?q?Lukas_M=C3=A4rdian?= <slyon@ubuntu.com>
+Date: Thu, 6 Jan 2022 14:36:12 +0100
+Subject: keyfile: do not try to write out unvalidated YAML (LP: #1952967)
+ (#247)
+
+netplan's keyfile parser can handle certain device types and settings from NM's keyfile format. But we should try to avoid writing out partial YAML where some (essential) fields are missing, as they cannot (yet) be properly parsed.
+
+We need to check that during testing and ideally also at runtime, in order to fall back to the full passthrough mode, using the generic nm-devices type.
+
+FR-1898
+
+COMMITS:
+* test:keyfile: add test case for tunnel regression
+* test:parser:base: check if 'netplan generate' was successful
+* parse-nm: Tunnels are not fully supported and generation might fail due to missing fields
+Fall back to using full passthrough mode ('nm-devices:') for now.
+* test:keyfile: avoid conflict with mutually exclusive ipv6-address-token/generation
+* abi-compat: add some debugging output during tests
+* test:parser:base: clear original file after being parsed
+* parse-nm: test-keyfile: do not try to parse vlans (implementation incomplete)
+* test-keyfile: increase coverage for non-standard keyfile filename
+* parse-nm: test-keyfile: validate config at after keyfile parsing
+return FALSE and fill the passed GError if it does not succeed
+* tests:parser:base: improve coverage comment
+
+Co-authored-by: Simon Chopin <simon.chopin@canonical.com>
+---
+ src/parse-nm.c               | 12 +++++-
+ src/validation.c             |  2 +-
+ tests/parser/base.py         | 28 ++++++++++---
+ tests/parser/test_keyfile.py | 95 ++++++++++++++++++++++++++++++++++++++------
+ 4 files changed, 115 insertions(+), 22 deletions(-)
+
+diff --git a/src/parse-nm.c b/src/parse-nm.c
+index 8579aef..0cfb3c8 100644
+--- a/src/parse-nm.c
++++ b/src/parse-nm.c
+@@ -23,6 +23,7 @@
+ #include "parse-nm.h"
+ #include "parse.h"
+ #include "util.h"
++#include "validation.h"
+ 
+ /**
+  * NetworkManager writes the alias for '802-3-ethernet' (ethernet),
+@@ -44,10 +45,14 @@ type_from_str(const char* type_str)
+         return NETPLAN_DEF_TYPE_BRIDGE;
+     else if (!g_strcmp0(type_str, "bond"))
+         return NETPLAN_DEF_TYPE_BOND;
++    /* TODO: Vlans are not yet fully supported by the keyfile parser
+     else if (!g_strcmp0(type_str, "vlan"))
+         return NETPLAN_DEF_TYPE_VLAN;
++    */
++    /* TODO: Tunnels are not yet supported by the keyfile parser
+     else if (!g_strcmp0(type_str, "ip-tunnel") || !g_strcmp0(type_str, "wireguard"))
+         return NETPLAN_DEF_TYPE_TUNNEL;
++    */
+     /* Unsupported type, needs to be specified via passthrough */
+     return NETPLAN_DEF_TYPE_NM;
+ }
+@@ -495,8 +500,7 @@ netplan_parse_keyfile(const char* filename, GError** error)
+         || nd_type == NETPLAN_DEF_TYPE_WIFI
+         || nd_type == NETPLAN_DEF_TYPE_MODEM
+         || nd_type == NETPLAN_DEF_TYPE_BRIDGE
+-        || nd_type == NETPLAN_DEF_TYPE_BOND
+-        || nd_type == NETPLAN_DEF_TYPE_VLAN)
++        || nd_type == NETPLAN_DEF_TYPE_BOND)
+         _kf_clear_key(kf, "connection", "type");
+ 
+     /* Handle match: Netplan usually defines a connection per interface, while
+@@ -746,5 +750,9 @@ only_passthrough:
+     }
+ 
+     g_key_file_free(kf);
++
++    /* validate definition-level conditions */
++    if (!validate_netdef_grammar(nd, NULL, error))
++        return FALSE;
+     return TRUE;
+ }
+diff --git a/src/validation.c b/src/validation.c
+index a0dca68..78b55ea 100644
+--- a/src/validation.c
++++ b/src/validation.c
+@@ -296,7 +296,7 @@ validate_tunnel_backend_rules(NetplanNetDefinition* nd, yaml_node_t* node, GErro
+ gboolean
+ validate_netdef_grammar(NetplanNetDefinition* nd, yaml_node_t* node, GError** error)
+ {
+-    int missing_id_count = g_hash_table_size(missing_id);
++    int missing_id_count = missing_id ? g_hash_table_size(missing_id) : 0;
+     gboolean valid = FALSE;
+ 
+     g_assert(nd->type != NETPLAN_DEF_TYPE_NONE);
+diff --git a/tests/parser/base.py b/tests/parser/base.py
+index 2150f82..45ea7f0 100644
+--- a/tests/parser/base.py
++++ b/tests/parser/base.py
+@@ -19,6 +19,7 @@
+ # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 
+ from configparser import ConfigParser
++from netplan.cli.utils import _GError
+ import os
+ import sys
+ import shutil
+@@ -72,6 +73,7 @@ class TestKeyfileBase(unittest.TestCase):
+ 
+     def generate_from_keyfile(self, keyfile, netdef_id=None, expect_fail=False, filename=None):
+         '''Call libnetplan with given keyfile string as configuration'''
++        err = ctypes.POINTER(_GError)()
+         # Autodetect default 'NM-<UUID>' netdef-id
+         ssid = ''
+         if not netdef_id:
+@@ -87,21 +89,33 @@ class TestKeyfileBase(unittest.TestCase):
+                 if found_values >= 2:
+                     break
+             netdef_id = 'NM-' + uuid
+-        if not filename:
+-            filename = 'netplan-{}{}.nmconnection'.format(netdef_id, ssid)
+-        f = os.path.join(self.workdir.name, 'run/NetworkManager/system-connections/{}'.format(filename))
++        generated_file = 'netplan-{}{}.nmconnection'.format(netdef_id, ssid)
++        original_file = filename or generated_file
++        f = os.path.join(self.workdir.name,
++                         'run/NetworkManager/system-connections/{}'.format(original_file))
+         os.makedirs(os.path.dirname(f))
++        # Create the original keyfile that will be parsed by netplan
+         with open(f, 'w') as file:
+             file.write(keyfile)
+ 
+         with capture_stderr() as outf:
+             if expect_fail:
+-                self.assertFalse(lib.netplan_parse_keyfile(f.encode(), None))
++                self.assertFalse(lib.netplan_parse_keyfile(f.encode(), ctypes.byref(err)))
++                if err:
++                    return err.contents.message.decode('utf-8')
+             else:
+-                self.assertTrue(lib.netplan_parse_keyfile(f.encode(), None))
++                self.assertTrue(lib.netplan_parse_keyfile(f.encode(), ctypes.byref(err)))
++                if err:  # pragma: nocover (only happens if a test fails so irrelevant for coverage)
++                    return err.contents.message.decode('utf-8')
++                # If the original file does not have a standard netplan-*.nmconnection
++                # filename it is being deleted in favor of the newly generated file.
++                # It has been parsed and is not needed anymore in this case
++                if generated_file != original_file:
++                    os.remove(f)
+                 lib._write_netplan_conf(netdef_id.encode(), self.workdir.name.encode())
+                 lib.netplan_clear_netdefs()
+-                self.assert_nm_regenerate({filename: keyfile})  # check re-generated keyfile
++                # check re-generated keyfile
++                self.assert_nm_regenerate({generated_file: keyfile})
+             with open(outf.name, 'r') as f:
+                 output = f.read().strip()  # output from stderr (fd=2) on C/library level
+                 return output
+@@ -147,7 +161,9 @@ class TestKeyfileBase(unittest.TestCase):
+         argv = [exe_generate, '--root-dir', self.workdir.name]
+         p = subprocess.Popen(argv, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, universal_newlines=True)
++        returncode = p.wait(5)
+         (out, err) = p.communicate()
++        self.assertEqual(returncode, 0, err)
+         self.assertEqual(out, '')
+         con_dir = os.path.join(self.workdir.name, 'run', 'NetworkManager', 'system-connections')
+         if file_contents_map:
+diff --git a/tests/parser/test_keyfile.py b/tests/parser/test_keyfile.py
+index ba13003..9c9475a 100644
+--- a/tests/parser/test_keyfile.py
++++ b/tests/parser/test_keyfile.py
+@@ -202,7 +202,6 @@ route-metric=4242
+ 
+ [ipv6]
+ addr-gen-mode=eui64
+-token=1234::3
+ dns-search=
+ method=auto
+ ignore-auto-routes=true
+@@ -227,7 +226,6 @@ route-metric=4242
+         route-metric: 4242
+       macaddress: "00:11:22:33:44:55"
+       ipv6-address-generation: "eui64"
+-      ipv6-address-token: "1234::3"
+       mtu: 1500
+       networkmanager:
+         uuid: "{}"
+@@ -238,6 +236,25 @@ route-metric=4242
+           proxy._: ""
+ '''.format(UUID, UUID)})
+ 
++    def test_keyfile_fail_validation(self):
++        err = self.generate_from_keyfile('''[connection]
++id=Test
++uuid={}
++type=ethernet
++
++[ethernet]
++wake-on-lan=0
++
++[ipv4]
++method=auto
++
++[ipv6]
++addr-gen-mode=eui64
++token=::42
++method=auto
++'''.format(UUID), expect_fail=True)
++        self.assertIn('Error in network definition:', err)
++
+     def test_keyfile_method_manual(self):
+         self.generate_from_keyfile('''[connection]
+ id=Test
+@@ -360,13 +377,13 @@ route1_options=unknown=invalid,
+         self._template_keyfile_type('bonds', 'bond')
+ 
+     def test_keyfile_type_vlan(self):
+-        self._template_keyfile_type('vlans', 'vlan')
++        self._template_keyfile_type('nm-devices', 'vlan', False)
+ 
+     def test_keyfile_type_tunnel(self):
+-        self._template_keyfile_type('tunnels', 'ip-tunnel', False)
++        self._template_keyfile_type('nm-devices', 'ip-tunnel', False)
+ 
+     def test_keyfile_type_wireguard(self):
+-        self._template_keyfile_type('tunnels', 'wireguard', False)
++        self._template_keyfile_type('nm-devices', 'wireguard', False)
+ 
+     def test_keyfile_type_other(self):
+         self._template_keyfile_type('nm-devices', 'dummy', False)
+@@ -784,21 +801,24 @@ address1=1.2.3.4/24
+ 
+ [ipv6]
+ method=ignore
+-'''.format(UUID), netdef_id='enblue', expect_fail=False, filename="some.keyfile")
++'''.format(UUID))
+         self.assert_netplan({UUID: '''network:
+   version: 2
+-  vlans:
+-    enblue:
++  nm-devices:
++    NM-{}:
+       renderer: NetworkManager
+-      addresses:
+-      - "1.2.3.4/24"
+-      id: 1
+       networkmanager:
+         uuid: "{}"
+         name: "netplan-enblue"
+         passthrough:
++          connection.type: "vlan"
++          connection.interface-name: "enblue"
++          vlan.id: "1"
+           vlan.parent: "en1"
+-'''.format(UUID)})
++          ipv4.method: "manual"
++          ipv4.address1: "1.2.3.4/24"
++          ipv6.method: "ignore"
++'''.format(UUID, UUID)})
+ 
+     def test_keyfile_bridge(self):
+         self.generate_from_keyfile('''[connection]
+@@ -902,7 +922,7 @@ method=auto
+ 
+ [ipv6]
+ method=ignore
+-'''.format(UUID), netdef_id='bn0')
++'''.format(UUID), netdef_id='bn0', expect_fail=False, filename='some.keyfile')
+         self.assert_netplan({UUID: '''network:
+   version: 2
+   bonds:
+@@ -1133,3 +1153,52 @@ route4=5:6:7:8:9:0:1:2/62
+           ipv6.dns-search: "wallaceandgromit.com;"
+           proxy._: ""
+ '''.format(UUID, UUID)})
++
++    def test_keyfile_tunnel_regression_lp1952967(self):
++        self.generate_from_keyfile('''[connection]
++id=IP tunnel connection 1
++uuid={}
++type=ip-tunnel
++autoconnect=false
++interface-name=gre10
++permissions=
++
++[ip-tunnel]
++local=10.20.20.1
++mode=2
++remote=10.20.20.2
++
++[ipv4]
++dns-search=
++method=auto
++
++[ipv6]
++addr-gen-mode=stable-privacy
++dns-search=
++method=auto
++
++[proxy]
++'''.format(UUID))
++        self.assert_netplan({UUID: '''network:
++  version: 2
++  nm-devices:
++    NM-{}:
++      renderer: NetworkManager
++      networkmanager:
++        uuid: "{}"
++        name: "IP tunnel connection 1"
++        passthrough:
++          connection.type: "ip-tunnel"
++          connection.autoconnect: "false"
++          connection.interface-name: "gre10"
++          connection.permissions: ""
++          ip-tunnel.local: "10.20.20.1"
++          ip-tunnel.mode: "2"
++          ip-tunnel.remote: "10.20.20.2"
++          ipv4.dns-search: ""
++          ipv4.method: "auto"
++          ipv6.addr-gen-mode: "stable-privacy"
++          ipv6.dns-search: ""
++          ipv6.method: "auto"
++          proxy._: ""
++'''.format(UUID, UUID)})
