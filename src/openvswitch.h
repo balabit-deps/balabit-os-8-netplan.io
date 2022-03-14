@@ -17,8 +17,21 @@
 
 #pragma once
 
-#include "parse.h"
+#include "netplan.h"
 
-void write_ovs_conf(const NetplanNetDefinition* def, const char* rootdir);
-void write_ovs_conf_finish(const char* rootdir);
-void cleanup_ovs_conf(const char* rootdir);
+NETPLAN_INTERNAL gboolean
+netplan_netdef_write_ovs(
+        const NetplanState* np_state,
+        const NetplanNetDefinition* netdef,
+        const char* rootdir,
+        gboolean* has_been_written,
+        GError** error);
+
+NETPLAN_INTERNAL gboolean
+netplan_state_finish_ovs_write(
+        const NetplanState* np_state,
+        const char* rootdir,
+        GError** error);
+
+NETPLAN_INTERNAL gboolean
+netplan_ovs_cleanup(const char* rootdir);

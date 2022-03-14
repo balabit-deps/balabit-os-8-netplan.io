@@ -6,8 +6,25 @@ BUILDFLAGS = \
 	-std=c99 \
 	-D_XOPEN_SOURCE=500 \
 	-DSBINDIR=\"$(SBINDIR)\" \
+	-I${CURDIR}/include \
 	-Wall \
 	-Werror \
+	$(NULL)
+
+SRCS = \
+	src/abi_compat.c \
+	src/error.c \
+	src/names.c \
+	src/netplan.c \
+	src/networkd.c \
+	src/nm.c \
+	src/openvswitch.c \
+	src/parse.c \
+	src/parse-nm.c \
+	src/sriov.c \
+	src/types.c \
+	src/util.c \
+	src/validation.c \
 	$(NULL)
 
 SYSTEMD_GENERATOR_DIR=$(shell pkg-config --variable=systemdsystemgeneratordir systemd)
@@ -29,24 +46,24 @@ INCLUDEDIR ?= $(PREFIX)/include
 PYCODE = netplan/ $(wildcard src/*.py) $(wildcard tests/*.py) $(wildcard tests/generator/*.py) $(wildcard tests/dbus/*.py)
 
 # Order: Fedora/Mageia/openSUSE || Debian/Ubuntu || null
-PYFLAKES3 ?= $(shell which pyflakes-3 || which pyflakes3 || echo true)
-PYCODESTYLE3 ?= $(shell which pycodestyle-3 || which pycodestyle || which pep8 || echo true)
-NOSETESTS3 ?= $(shell which nosetests-3 || which nosetests3 || echo true)
+PYFLAKES3 ?= $(shell command -v pyflakes-3 || command -v pyflakes3 || echo true)
+PYCODESTYLE3 ?= $(shell command -v pycodestyle-3 || command -v pycodestyle || command -v pep8 || echo true)
+NOSETESTS3 ?= $(shell command -v nosetests-3 || command -v nosetests3 || echo true)
 
 default: netplan/_features.py generate netplan-dbus dbus/io.netplan.Netplan.service doc/netplan.html doc/netplan.5 doc/netplan-generate.8 doc/netplan-apply.8 doc/netplan-try.8 doc/netplan-dbus.8 doc/netplan-get.8 doc/netplan-set.8
 
 %.o: src/%.c
 	$(CC) $(BUILDFLAGS) $(CFLAGS) $(LDFLAGS) -c $^ `pkg-config --cflags --libs glib-2.0 gio-2.0 yaml-0.1 uuid`
 
-libnetplan.so.$(NETPLAN_SOVER): parse.o netplan.o util.o validation.o error.o parse-nm.o
-	$(CC) -shared -Wl,-soname,libnetplan.so.$(NETPLAN_SOVER) $(BUILDFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $^ `pkg-config --libs glib-2.0 gio-2.0 yaml-0.1`
+libnetplan.so.$(NETPLAN_SOVER): $(SRCS) abicompat.lds
+	$(CC) -shared -Wl,-soname,libnetplan.so.$(NETPLAN_SOVER) $(BUILDFLAGS) $(CFLAGS) -fvisibility=hidden $(LDFLAGS) -o $@ $(SRCS) -T abicompat.lds `pkg-config --cflags --libs glib-2.0 gio-2.0 yaml-0.1 uuid`
 	ln -snf libnetplan.so.$(NETPLAN_SOVER) libnetplan.so
 
-generate: libnetplan.so.$(NETPLAN_SOVER) nm.o networkd.o openvswitch.o generate.o sriov.o
-	$(CC) $(BUILDFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $^ -L. -lnetplan `pkg-config --cflags --libs glib-2.0 gio-2.0 yaml-0.1 uuid`
+generate: libnetplan.so.$(NETPLAN_SOVER) generate.o
+	$(CC) $(BUILDFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(filter-out $<,$^) -L. -lnetplan `pkg-config --cflags --libs glib-2.0 gio-2.0 yaml-0.1 uuid`
 
-netplan-dbus: src/dbus.c src/_features.h parse.o util.o validation.o error.o
-	$(CC) $(BUILDFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(patsubst %.h,,$^) `pkg-config --cflags --libs libsystemd glib-2.0 gio-2.0 yaml-0.1`
+netplan-dbus: libnetplan.so.$(NETPLAN_SOVER) src/_features.h dbus.o
+	$(CC) $(BUILDFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(filter-out $<,$(patsubst %.h,,$^)) -L. -lnetplan `pkg-config --cflags --libs libsystemd glib-2.0 gio-2.0 yaml-0.1 uuid`
 
 src/_features.h: src/[^_]*.[hc]
 	printf "#include <stddef.h>\nstatic const char *feature_flags[] __attribute__((__unused__)) = {\n" > $@
@@ -114,7 +131,7 @@ install: default
 	install -m 644 *.so.* $(DESTDIR)/$(LIBDIR)/
 	ln -snf libnetplan.so.$(NETPLAN_SOVER) $(DESTDIR)/$(LIBDIR)/libnetplan.so
 	# headers, dev data
-	install -m 644 src/*.h $(DESTDIR)/$(INCLUDEDIR)/netplan/
+	install -m 644 include/*.h $(DESTDIR)/$(INCLUDEDIR)/netplan/
 	# TODO: install pkg-config once available
 	# docs, data
 	install -m 644 doc/*.html $(DESTDIR)/$(DOCDIR)/netplan/
@@ -133,7 +150,7 @@ install: default
 
 
 %.html: %.md
-	pandoc -s --toc -o $@ $<
+	pandoc -s --metadata title="Netplan reference" --toc -o $@ $<
 
 doc/netplan.5: doc/manpage-header.md doc/netplan.md doc/manpage-footer.md
 	pandoc -s -o $@ $^

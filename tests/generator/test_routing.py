@@ -720,6 +720,92 @@ RouteMetric=100
 UseMTU=true
 '''})
 
+    def test_default_scope_link_lp1805038(self):
+        self.generate('''network:
+  version: 2
+  ethernets:
+    engreen:
+      dhcp4: true
+      routes:
+      - to: 10.96.0.0/24
+    enred:
+      dhcp4: true
+      routes:
+      - to: 10.97.0.0/24
+        type: broadcast
+''', skip_generated_yaml_validation=True)  # scope: link is a default value in this case
+
+        self.assert_networkd({'engreen.network': '''[Match]
+Name=engreen
+
+[Network]
+DHCP=ipv4
+LinkLocalAddressing=ipv6
+
+[Route]
+Destination=10.96.0.0/24
+Scope=link
+
+[DHCP]
+RouteMetric=100
+UseMTU=true
+''',
+                              'enred.network': '''[Match]
+Name=enred
+
+[Network]
+DHCP=ipv4
+LinkLocalAddressing=ipv6
+
+[Route]
+Destination=10.97.0.0/24
+Scope=link
+Type=broadcast
+
+[DHCP]
+RouteMetric=100
+UseMTU=true
+'''})
+
+    def test_type_local_lp1892272(self):
+        self.generate('''network:
+  version: 2
+  ethernets:
+    engreen:
+      dhcp4: true
+      routes:
+      - to: 0.0.0.0/0
+        type: local
+        table: 99
+      - to: ::0/0
+        type: local
+        table: 100
+''', skip_generated_yaml_validation=True)  # scope: host is a default value in this case
+
+        self.assert_networkd({'engreen.network': '''[Match]
+Name=engreen
+
+[Network]
+DHCP=ipv4
+LinkLocalAddressing=ipv6
+
+[Route]
+Destination=0.0.0.0/0
+Scope=host
+Type=local
+Table=99
+
+[Route]
+Destination=::0/0
+Scope=host
+Type=local
+Table=100
+
+[DHCP]
+RouteMetric=100
+UseMTU=true
+'''})
+
 
 class TestNetworkManager(TestBase):
 
@@ -844,6 +930,7 @@ method=link-local
 [ipv6]
 method=manual
 address1=2001:f00f:f00f::2/64
+ip6-privacy=0
 route1=2001:dead:beef::2/64,2001:beef:beef::1
 '''})
 
@@ -875,6 +962,7 @@ method=link-local
 [ipv6]
 method=manual
 address1=2001:f00f:f00f::2/64
+ip6-privacy=0
 route1=2001:dead:beef::2/64,2001:beef:beef::1
 route2=2001:dead:feed::2/64,2001:beef:beef::2,1000
 '''})
@@ -904,6 +992,7 @@ method=link-local
 [ipv6]
 method=manual
 address1=2001:dead:beef::2/64
+ip6-privacy=0
 route1=::/0,2001:beef:beef::1
 '''})
 
@@ -948,6 +1037,7 @@ route3=11.11.11.0/24,192.168.1.3,9999
 [ipv6]
 method=manual
 address1=2001:f00f::2/128
+ip6-privacy=0
 route1=2001:dead:beef::2/64,2001:beef:beef::1,997
 route2=2001:f00f:f00f::fe/64,2001:beef:feed::1
 '''})
@@ -1185,33 +1275,33 @@ method=ignore
 '''})
         self.assert_networkd({})
 
-    def test_route_reject_scope(self):
-        out = self.generate('''network:
+    def test_route_reject_type(self):
+        err = self.generate('''network:
   version: 2
+  renderer: NetworkManager
   ethernets:
     engreen:
-      renderer: NetworkManager
       addresses: ["192.168.14.2/24"]
       routes:
         - to: 10.10.10.0/24
           via: 192.168.1.20
-          scope: host
+          type: blackhole
           ''', expect_fail=True)
-        self.assertIn('ERROR: engreen: NetworkManager does not support setting a scope for routes', out)
+        self.assertIn('NetworkManager only supports unicast routes', err)
 
         self.assert_nm({})
         self.assert_networkd({})
 
-    def test_route_reject_type(self):
+    def test_route_reject_type_v6(self):
         err = self.generate('''network:
   version: 2
+  renderer: NetworkManager
   ethernets:
     engreen:
-      renderer: NetworkManager
-      addresses: ["192.168.14.2/24"]
+      addresses: ["2001:f00f::2/128"]
       routes:
-        - to: 10.10.10.0/24
-          via: 192.168.1.20
+        - to: 2001:dead:beef::2/64
+          via: 2001:beef:beef::1
           type: blackhole
           ''', expect_fail=True)
         self.assertIn('NetworkManager only supports unicast routes', err)
@@ -1272,6 +1362,7 @@ method=auto
 
 [ipv6]
 method=auto
+ip6-privacy=0
 ignore-auto-routes=true
 never-default=true
 '''})
@@ -1302,6 +1393,7 @@ route-metric=4000
 
 [ipv6]
 method=auto
+ip6-privacy=0
 '''})
 
     def test_default_metric_v6(self):
@@ -1329,5 +1421,6 @@ method=auto
 
 [ipv6]
 method=auto
+ip6-privacy=0
 route-metric=5050
 '''})

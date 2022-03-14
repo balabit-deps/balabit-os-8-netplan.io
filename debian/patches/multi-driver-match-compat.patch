@@ -1,0 +1,49 @@
+Description: Be less strict about match.driver input validation on SRU
+ This is for backwards compatibility on stable series only
+Author: Lukas Märdian <slyon@ubuntu.com>
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1918421
+Origin: vendor, Ubuntu
+Forwarded: not-needed, only applies to SRU
+Last-Update: 2022-03-11
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- netplan.io-0.104.orig/src/parse.c
++++ netplan.io-0.104/src/parse.c
+@@ -640,8 +640,11 @@ handle_match_driver(NetplanParser* npp,
+      * single scalar specifying a single driver glob/match, or a sequence of many
+      * globs any of which must match. */
+     if (node->type == YAML_SCALAR_NODE) {
++        /* be less strict about input validation on stable series for backwards compatibility
++         * see LP: #1918421
+         if (g_strrstr(scalar(node), " "))
+             return yaml_error(npp, node, error, "A 'driver' glob cannot contain whitespace");
++        */
+         ret = handle_netdef_str(npp, node, netdef_offset(match.driver), error);
+     } else if (node->type == YAML_SEQUENCE_NODE) {
+         for (yaml_node_item_t *iter = node->data.sequence.items.start; iter < node->data.sequence.items.top; iter++) {
+--- netplan.io-0.104.orig/tests/generator/test_ethernets.py
++++ netplan.io-0.104/tests/generator/test_ethernets.py
+@@ -483,14 +483,20 @@ Driver=bcmgenet smsc*
+ LinkLocalAddressing=ipv6
+ '''})
+ 
++    # compatibilty mode for stable series, see LP: #1918421
+     def test_eth_match_by_drivers_whitespace(self):
+-        err = self.generate('''network:
++        self.generate('''network:
+   version: 2
+   ethernets:
+     def1:
+       match:
+-        driver: "bcmgenet smsc*"''', expect_fail=True)
+-        self.assertIn('A \'driver\' glob cannot contain whitespace', err)
++        driver: "bcmgenet smsc*"''')
++        self.assert_networkd({'def1.network': '''[Match]
++Driver=bcmgenet smsc*
++
++[Network]
++LinkLocalAddressing=ipv6
++'''})
+ 
+     def test_eth_match_by_drivers_whitespace_sequence(self):
+         err = self.generate('''network:

@@ -1,3 +1,38 @@
+netplan.io (0.104-0ubuntu2~20.04.1) focal; urgency=medium
+
+  * Backport netplan.io 0.104-0ubuntu2 to 20.04 (LP: #1964481)
+    - Enable 'embedded-switch-mode' setting on SmartNICs
+    - Permit multiple patterns for the driver globs in match
+    - Improve routing capabilities
+    - Support additional link offload options for networkd
+    - Handle differing 'ip6-privacy' default value for NetworkManager
+    - YAML state tracking for DBus API and 'netplan try'
+    - Support ConfigureWithoutCarrier ('ignore-carrier') for networkd
+    - Cleanup Makefile, install only public headers
+    - Netplan 'get' to use the libnetplan parser
+    - libnetplan:
+      + introduce the notion of NetplanState
+      + use an explicit parser context
+      + expose coherent generator APIs
+      + improve overall error handling
+      + consolidation of YAML parsing into the library
+    ATTENTION:
+    - Restrict the symbol export to a determined public API
+      + We dropped some internal symbols from the API that we know have no
+        external consumers, see upstream changelog for list of dropped symbols
+  * Add d/p/0003-Mute-gateway4-6-deprecation-warnings.patch:
+    - Do not show a deprecation warning on the backported version
+  * Add d/p/0006-cli-apply-give-some-extra-time-for-networkctl-reload.patch:
+    - To support networkctl reload/reconfigure on older versions of sd-networkd
+  * Add d/p/test-ethernets-stability.patch to improve autopkgtest reliability
+  * Add d/p/multi-driver-match-compat.patch for match.driver backwards compat
+  * Update systemd dependency to >= 245.4-4ubuntu3.8 for activation-mode
+  * Update debian/gbp.conf
+  * Use debhelper-compat 12 and Standards-Version 4.5.0 in debian/control
+  * Keep riscv64 build-time tests disabled
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Mon, 14 Mar 2022 12:41:44 +0100
+
 netplan.io (0.103-0ubuntu5~20.04.6) focal; urgency=medium
 
   * Do not write unvalidated YAML, fixing NM ip-tunnel handling (LP: #1962297)

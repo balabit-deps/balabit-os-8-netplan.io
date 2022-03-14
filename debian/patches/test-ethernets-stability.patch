@@ -1,0 +1,17 @@
+Description: tests:ethernets: improve autopkgtest reliability
+Author: Lukas Märdian <slyon@ubuntu.com>
+Forwarded: https://github.com/canonical/netplan/commit/e8e2f13ffbf5c853f8ae3b3025b371768b3dd38c
+Last-Update: 2022-03-11
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- netplan.io-0.104.orig/tests/integration/ethernets.py
++++ netplan.io-0.104/tests/integration/ethernets.py
+@@ -253,7 +253,7 @@ class TestNetworkd(IntegrationTestsBase,
+       dhcp6: no
+       accept-ra: yes
+       addresses: [ '192.168.1.100/24' ]''' % {'r': self.backend, 'ec': self.dev_e_client})
+-        self.generate_and_settle([self.dev_e_client])
++        self.generate_and_settle([self.state_dhcp6(self.dev_e_client)])
+         self.assert_iface_up(self.dev_e_client, ['inet6 2600:'], [])
+ 
+     def test_eth_dhcp6_off_no_accept_ra(self):

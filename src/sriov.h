@@ -16,6 +16,13 @@
  */
 
 #pragma once
+#include "netplan.h"
 
-void write_sriov_conf_finish(const char* rootdir);
-void cleanup_sriov_conf(const char* rootdir);
+NETPLAN_INTERNAL gboolean
+netplan_state_finish_sriov_write(
+        const NetplanState* np_state,
+        const char* rootdir,
+        GError** error);
+
+NETPLAN_INTERNAL gboolean
+netplan_sriov_cleanup(const char* rootdir);

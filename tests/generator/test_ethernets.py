@@ -468,6 +468,58 @@ method=ignore
         driver: ixgbe''', expect_fail=True)
         self.assertIn('NetworkManager definitions do not support matching by driver', err)
 
+    def test_eth_match_by_drivers(self):
+        self.generate('''network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    def1:
+      match:
+        driver: ["bcmgenet", "smsc*"]''')
+        self.assert_networkd({'def1.network': '''[Match]
+Driver=bcmgenet smsc*
+
+[Network]
+LinkLocalAddressing=ipv6
+'''})
+
+    def test_eth_match_by_drivers_whitespace(self):
+        err = self.generate('''network:
+  version: 2
+  ethernets:
+    def1:
+      match:
+        driver: "bcmgenet smsc*"''', expect_fail=True)
+        self.assertIn('A \'driver\' glob cannot contain whitespace', err)
+
+    def test_eth_match_by_drivers_whitespace_sequence(self):
+        err = self.generate('''network:
+  version: 2
+  ethernets:
+    def1:
+      match:
+        driver: ["ixgbe", "bcmgenet smsc*"]''', expect_fail=True)
+        self.assertIn('A \'driver\' glob cannot contain whitespace', err)
+
+    def test_eth_match_by_drivers_invalid_sequence(self):
+        err = self.generate('''network:
+  version: 2
+  ethernets:
+    def1:
+      match:
+        driver: []''', expect_fail=True)
+        self.assertIn('invalid sequence for \'driver\'', err)
+
+    def test_eth_match_by_drivers_invalid_type(self):
+        err = self.generate('''network:
+  version: 2
+  ethernets:
+    def1:
+      match:
+        driver:
+            some_mapping: true''', expect_fail=True)
+        self.assertIn('invalid type for \'driver\': must be a scalar or a sequence of scalars', err)
+
     def test_eth_match_by_driver_rename(self):
         # in this case udev will rename the device so that NM can use the name
         self.generate('''network:
@@ -713,3 +765,37 @@ method=ignore
 '''})
         self.assert_networkd({})
         self.assert_nm_udev(None)
+
+    def test_offload(self):
+        self.generate('''network:
+  version: 2
+  ethernets:
+    eth1:
+      receive-checksum-offload: true
+      transmit-checksum-offload: true
+      tcp-segmentation-offload: true
+      tcp6-segmentation-offload: true
+      generic-segmentation-offload: true
+      generic-receive-offload: true
+      large-receive-offload: true''')
+
+        self.assert_networkd({'eth1.link': '''[Match]
+OriginalName=eth1
+
+[Link]
+WakeOnLan=off
+ReceiveChecksumOffload=1
+TransmitChecksumOffload=1
+TCPSegmentationOffload=1
+TCP6SegmentationOffload=1
+GenericSegmentationOffload=1
+GenericReceiveOffload=1
+LargeReceiveOffload=1
+''',
+                              'eth1.network': '''[Match]
+Name=eth1
+
+[Network]
+LinkLocalAddressing=ipv6
+'''})
+        self.assert_networkd_udev(None)

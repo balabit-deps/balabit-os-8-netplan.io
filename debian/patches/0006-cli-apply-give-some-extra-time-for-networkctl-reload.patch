@@ -1,0 +1,29 @@
+Description: cli:apply: give some extra time for 'networkctl reload'.
+ Older versions of systemd-networkd get confused if 'networkctl reconfigure'
+ is called while 'networkctl reload' is still settling.
+Author: Lukas Märdian <slyon@ubuntu.com>
+Origin: vendor, Ubuntu
+Forwarded: not-needed
+Last-Update: 2022-03-10
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+---
+ netplan/cli/commands/apply.py | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/netplan/cli/commands/apply.py b/netplan/cli/commands/apply.py
+index b36662a..3501843 100644
+--- a/netplan/cli/commands/apply.py
++++ b/netplan/cli/commands/apply.py
+@@ -254,6 +254,11 @@ class NetplanApply(utils.NetplanCommand):
+             # with 'oneshot' systemd service units, e.g. netplan-ovs-*.service.
+             try:
+                 utils.networkctl_reload()
++                for _ in range(10):  # wait up to 5 sec for 'reload' to settle
++                    time.sleep(0.5)
++                    out = subprocess.check_output(['networkctl'], universal_newlines=True)
++                    if 'configuring' not in out:
++                        break
+                 utils.networkctl_reconfigure(utils.networkd_interfaces())
+             except subprocess.CalledProcessError:
+                 # (re-)start systemd-networkd if it is not running, yet

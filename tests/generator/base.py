@@ -76,9 +76,21 @@ ND_WITHIPGW = '[Match]\nName=%s\n\n[Network]\nLinkLocalAddressing=ipv6\nAddress=
 ConfigureWithoutCarrier=yes\n'
 NM_WG = '[connection]\nid=netplan-wg0\ntype=wireguard\ninterface-name=wg0\n\n[wireguard]\nprivate-key=%s\nlisten-port=%s\n%s\
 \n\n[ipv4]\nmethod=manual\naddress1=15.15.15.15/24\ngateway=20.20.20.21\n\n[ipv6]\nmethod=manual\naddress1=\
-2001:de:ad:be:ef:ca:fe:1/128\n'
+2001:de:ad:be:ef:ca:fe:1/128\nip6-privacy=0\n'
 ND_WG = '[NetDev]\nName=wg0\nKind=wireguard\n\n[WireGuard]\nPrivateKey%s\nListenPort=%s\n%s\n'
 ND_VLAN = '[NetDev]\nName=%s\nKind=vlan\n\n[VLAN]\nId=%d\n'
+SD_WPA = '''[Unit]
+Description=WPA supplicant for netplan %(iface)s
+DefaultDependencies=no
+Requires=sys-subsystem-net-devices-%(iface)s.device
+After=sys-subsystem-net-devices-%(iface)s.device
+Before=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/sbin/wpa_supplicant -c /run/netplan/wpa-%(iface)s.conf -i%(iface)s -D%(drivers)s
+'''
 
 
 class NetplanV2Normalizer():
@@ -174,35 +186,35 @@ class NetplanV2Normalizer():
             if 'password' in keys and ':auth' not in full_key:
                 data['auth'] = {'key-management': 'psk', 'password': data['password']}
                 del data['password']
-            elif 'auth' in keys and data['auth'] == {}:
+            if 'auth' in keys and data['auth'] == {}:
                 data['auth'] = {'key-management': 'none'}
             # remove default stanza ("link-local: [ ipv6 ]"")
-            elif 'link-local' in keys and data['link-local'] == ['ipv6']:
+            if 'link-local' in keys and data['link-local'] == ['ipv6']:
                 del data['link-local']
             # remove default stanza ("wakeonwlan: [ default ]")
-            elif 'wakeonwlan' in keys and data['wakeonwlan'] == ['default']:
+            if 'wakeonwlan' in keys and data['wakeonwlan'] == ['default']:
                 del data['wakeonwlan']
             # remove explicit openvswitch stanzas, they might not always be
             # defined in the original YAML (due to being implicit)
-            elif ('openvswitch' in keys and data['openvswitch'] == {} and
-                  any(map(full_key.__contains__, [':bonds:', ':bridges:', ':vlans:']))):
+            if ('openvswitch' in keys and data['openvswitch'] == {} and
+                    any(map(full_key.__contains__, [':bonds:', ':bridges:', ':vlans:']))):
                 del data['openvswitch']
             # remove default empty bond-parameters, those are not rendered by the YAML generator
-            elif 'parameters' in keys and data['parameters'] == {} and ':bonds:' in full_key:
+            if 'parameters' in keys and data['parameters'] == {} and ':bonds:' in full_key:
                 del data['parameters']
             # remove default mode=infrastructore from wifi APs, keeping the SSID
-            elif 'mode' in keys and ':wifis:' in full_key and 'infrastructure' in data['mode']:
+            if 'mode' in keys and ':wifis:' in full_key and 'infrastructure' in data['mode']:
                 del data['mode']
             # ignore renderer: on other than global levels for now, as that
             # information is currently not stored in the netdef data structure
-            elif ('renderer' in keys and len(full_key.split(':')) > 1 and
-                  data['renderer'] in ['networkd', 'NetworkManager']):
+            if ('renderer' in keys and len(full_key.split(':')) > 1 and
+                    data['renderer'] in ['networkd', 'NetworkManager']):
                 del data['renderer']
             # remove default values from the dhcp4/6-overrides mappings
-            elif full_key.endswith(':dhcp4-overrides') or full_key.endswith(':dhcp6-overrides'):
+            if full_key.endswith(':dhcp4-overrides') or full_key.endswith(':dhcp6-overrides'):
                 self._clear_mapping_defaults(keys, self.DEFAULT_DHCP, data)
             # remove default values from netdef/interface mappings
-            elif len(full_key.split(':')) == 3:  # netdef level
+            if len(full_key.split(':')) == 3:  # netdef level
                 self._clear_mapping_defaults(keys, self.DEFAULT_NETDEF, data)
 
             # continue to walk the dict
@@ -444,3 +456,10 @@ class TestBase(unittest.TestCase):
                 self.assertEqual(link_target,
                                  os.path.join(
                                     '/', 'run', 'systemd', 'system', fname))
+
+    def assert_sriov(self, file_contents_map):
+        systemd_dir = os.path.join(self.workdir.name, 'run', 'systemd', 'system')
+        sriov_systemd_dir = glob.glob(os.path.join(systemd_dir, '*netplan-sriov-*.service'))
+        self.assertEqual(set(os.path.basename(file) for file in sriov_systemd_dir),
+                         {'netplan-sriov-' + f for f in file_contents_map})
+        self.assertEqual(set(os.listdir(self.workdir.name)) - {'lib'}, {'etc', 'run'})

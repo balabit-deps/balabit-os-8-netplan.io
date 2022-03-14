@@ -7,8 +7,6 @@ Subject: Disable some tests, due to ovs-vsctl missing on riscv64
  tests/generator/test_ovs.py | 25 +++++++++++++++++++++++++
  1 file changed, 25 insertions(+)
 
-diff --git a/tests/generator/test_ovs.py b/tests/generator/test_ovs.py
-index e7084a9..15d4b59 100644
 --- a/tests/generator/test_ovs.py
 +++ b/tests/generator/test_ovs.py
 @@ -17,6 +17,9 @@
@@ -21,7 +19,7 @@ index e7084a9..15d4b59 100644
  from .base import TestBase, ND_EMPTY, ND_WITHIP, ND_DHCP4, ND_DHCP6, \
                              OVS_PHYSICAL, OVS_VIRTUAL, \
                              OVS_BR_EMPTY, OVS_BR_DEFAULT, \
-@@ -26,6 +29,7 @@ from .base import TestBase, ND_EMPTY, ND_WITHIP, ND_DHCP4, ND_DHCP6, \
+@@ -26,6 +29,7 @@ from .base import TestBase, ND_EMPTY, ND
  class TestOpenVSwitch(TestBase):
      '''OVS output'''
  
@@ -29,7 +27,7 @@ index e7084a9..15d4b59 100644
      def test_interface_external_ids_other_config(self):
          self.generate('''network:
    version: 2
-@@ -118,6 +122,7 @@ ExecStart=/usr/bin/ovs-vsctl set open_vswitch . external-ids:netplan/other-confi
+@@ -118,6 +122,7 @@ ExecStart=/usr/bin/ovs-vsctl set open_vs
          # Confirm that the networkd config is still sane
          self.assert_networkd({'eth0.network': ND_DHCP4 % 'eth0'})
  
@@ -37,7 +35,7 @@ index e7084a9..15d4b59 100644
      def test_global_set_protocols(self):
          self.generate('''network:
    version: 2
-@@ -161,6 +166,7 @@ ExecStart=/usr/bin/ovs-vsctl set Bridge ovs0 external-ids:netplan/protocols=Open
+@@ -161,6 +166,7 @@ ExecStart=/usr/bin/ovs-vsctl set Bridge
          self.assert_ovs({'cleanup.service': OVS_CLEANUP % {'iface': 'cleanup'}})
          self.assert_networkd({'eth0.network': ND_DHCP4 % 'eth0'})
  
@@ -45,7 +43,7 @@ index e7084a9..15d4b59 100644
      def test_bond_setup(self):
          self.generate('''network:
    version: 2
-@@ -200,6 +206,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bond0 external-ids:netplan/external-ids/if
+@@ -200,6 +206,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bo
                                'br0.network': ND_WITHIP % ('br0', '192.170.1.1/24'),
                                'bond0.network': ND_EMPTY % ('bond0', 'no')})
  
@@ -53,7 +51,7 @@ index e7084a9..15d4b59 100644
      def test_bond_no_bridge(self):
          err = self.generate('''network:
    version: 2
-@@ -213,6 +220,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bond0 external-ids:netplan/external-ids/if
+@@ -213,6 +220,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bo
  ''', expect_fail=True)
          self.assertIn("Bond bond0 needs to be a slave of an OpenVSwitch bridge", err)
  
@@ -61,7 +59,7 @@ index e7084a9..15d4b59 100644
      def test_bond_not_enough_interfaces(self):
          err = self.generate('''network:
    version: 2
-@@ -230,6 +238,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bond0 external-ids:netplan/external-ids/if
+@@ -230,6 +238,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bo
  ''', expect_fail=True)
          self.assertIn("Bond bond0 needs to have at least 2 slave interfaces", err)
  
@@ -69,7 +67,7 @@ index e7084a9..15d4b59 100644
      def test_bond_lacp(self):
          self.generate('''network:
    version: 2
-@@ -295,6 +304,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bond0 external-ids:netplan/lacp=active
+@@ -295,6 +304,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bo
  ''', expect_fail=True)
          self.assertIn("Key 'lacp' is only valid for interface type 'openvswitch bond'", err)
  
@@ -77,7 +75,7 @@ index e7084a9..15d4b59 100644
      def test_bond_mode_implicit_params(self):
          self.generate('''network:
    version: 2
-@@ -333,6 +343,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bond0 external-ids:netplan/bond_mode=balan
+@@ -333,6 +343,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bo
                                'br0.network': ND_WITHIP % ('br0', '192.170.1.1/24'),
                                'bond0.network': ND_EMPTY % ('bond0', 'no')})
  
@@ -85,7 +83,7 @@ index e7084a9..15d4b59 100644
      def test_bond_mode_explicit_params(self):
          self.generate('''network:
    version: 2
-@@ -372,6 +383,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bond0 external-ids:netplan/bond_mode=activ
+@@ -372,6 +383,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bo
                                'br0.network': ND_WITHIP % ('br0', '192.170.1.1/24'),
                                'bond0.network': ND_EMPTY % ('bond0', 'no')})
  
@@ -93,7 +91,7 @@ index e7084a9..15d4b59 100644
      def test_bond_mode_ovs_invalid(self):
          err = self.generate('''network:
    version: 2
-@@ -392,6 +404,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bond0 external-ids:netplan/bond_mode=activ
+@@ -392,6 +404,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port bo
  ''', expect_fail=True)
          self.assertIn("bond0: bond mode 'balance-rr' not supported by openvswitch", err)
  
@@ -101,7 +99,7 @@ index e7084a9..15d4b59 100644
      def test_bridge_setup(self):
          self.generate('''network:
    version: 2
-@@ -418,6 +431,7 @@ ExecStart=/usr/bin/ovs-vsctl --may-exist add-port br0 eth2
+@@ -418,6 +431,7 @@ ExecStart=/usr/bin/ovs-vsctl --may-exist
                                'eth2.network': '[Match]\nName=eth2\n\n[Network]\nLinkLocalAddressing=no\nBridge=br0\n',
                                'br0.network': ND_WITHIP % ('br0', '192.170.1.1/24')})
  
@@ -109,7 +107,7 @@ index e7084a9..15d4b59 100644
      def test_bridge_external_ids_other_config(self):
          self.generate('''network:
    version: 2
-@@ -443,6 +457,7 @@ ExecStart=/usr/bin/ovs-vsctl set Bridge br0 external-ids:netplan/other-config/di
+@@ -443,6 +457,7 @@ ExecStart=/usr/bin/ovs-vsctl set Bridge
          # Confirm that the bridge has been only configured for OVS
          self.assert_networkd({'br0.network': ND_EMPTY % ('br0', 'ipv6')})
  
@@ -117,7 +115,7 @@ index e7084a9..15d4b59 100644
      def test_bridge_non_default_parameters(self):
          self.generate('''network:
    version: 2
-@@ -509,6 +524,7 @@ ExecStart=/usr/bin/ovs-vsctl set Bridge br0 external-ids:netplan/rstp_enable=tru
+@@ -509,6 +524,7 @@ ExecStart=/usr/bin/ovs-vsctl set Bridge
  ''', expect_fail=True)
          self.assertIn("Key is only valid for interface type 'openvswitch bridge'", err)
  
@@ -125,7 +123,7 @@ index e7084a9..15d4b59 100644
      def test_bridge_set_protocols(self):
          self.generate('''network:
    version: 2
-@@ -550,6 +566,7 @@ ExecStart=/usr/bin/ovs-vsctl set Bridge br0 external-ids:netplan/protocols=OpenF
+@@ -550,6 +566,7 @@ ExecStart=/usr/bin/ovs-vsctl set Bridge
  ''', expect_fail=True)
          self.assertIn("Key 'protocols' is only valid for interface type 'openvswitch bridge'", err)
  
@@ -133,7 +131,7 @@ index e7084a9..15d4b59 100644
      def test_bridge_controller(self):
          self.generate('''network:
    version: 2
-@@ -687,6 +704,7 @@ ExecStart=/usr/bin/ovs-vsctl set open_vswitch . external-ids:netplan/global/set-
+@@ -687,6 +704,7 @@ ExecStart=/usr/bin/ovs-vsctl set open_vs
          # Confirm that the networkd config is still sane
          self.assert_networkd({})
  
@@ -141,7 +139,7 @@ index e7084a9..15d4b59 100644
      def test_missing_ssl(self):
          err = self.generate('''network:
    version: 2
-@@ -762,6 +780,7 @@ ExecStart=/usr/bin/ovs-vsctl set open_vswitch . external-ids:netplan/global/set-
+@@ -762,6 +780,7 @@ ExecStart=/usr/bin/ovs-vsctl set open_vs
          self.assert_ovs({})
          self.assert_networkd({})
  
@@ -157,7 +155,7 @@ index e7084a9..15d4b59 100644
      def test_bond_auto_ovs_backend(self):
          self.generate('''network:
    version: 2
-@@ -870,6 +890,7 @@ ExecStart=/usr/bin/ovs-vsctl set Interface patchy external-ids:netplan=true
+@@ -870,6 +890,7 @@ ExecStart=/usr/bin/ovs-vsctl set Interfa
                                'patchy.network': ND_EMPTY % ('patchy', 'no'),
                                'eth0.network': '[Match]\nName=eth0\n\n[Network]\nLinkLocalAddressing=no\nBond=bond0\n'})
  
@@ -165,7 +163,7 @@ index e7084a9..15d4b59 100644
      def test_patch_ports(self):
          self.generate('''network:
    version: 2
-@@ -918,6 +939,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port patch1-0 external-ids:netplan=true
+@@ -918,6 +939,7 @@ ExecStart=/usr/bin/ovs-vsctl set Port pa
                                'patch0-1.network': ND_EMPTY % ('patch0-1', 'no'),
                                'patch1-0.network': ND_EMPTY % ('patch1-0', 'no')})
  
@@ -173,7 +171,7 @@ index e7084a9..15d4b59 100644
      def test_fake_vlan_bridge_setup(self):
          self.generate('''network:
    version: 2
-@@ -950,6 +972,7 @@ ExecStart=/usr/bin/ovs-vsctl set Interface br0.100 external-ids:netplan=true
+@@ -950,6 +972,7 @@ ExecStart=/usr/bin/ovs-vsctl set Interfa
          self.assert_networkd({'br0.network': ND_WITHIP % ('br0', '192.168.1.1/24'),
                                'br0.100.network': ND_EMPTY % ('br0.100', 'ipv6')})
  
@@ -181,7 +179,7 @@ index e7084a9..15d4b59 100644
      def test_implicit_fake_vlan_bridge_setup(self):
          # Test if, when a VLAN is added to an OVS bridge, netplan will
          # implicitly assume the vlan should be done via OVS as well
-@@ -979,6 +1002,7 @@ ExecStart=/usr/bin/ovs-vsctl set Interface br0.100 external-ids:netplan=true
+@@ -979,6 +1002,7 @@ ExecStart=/usr/bin/ovs-vsctl set Interfa
          self.assert_networkd({'br0.network': ND_WITHIP % ('br0', '192.168.1.1/24'),
                                'br0.100.network': ND_EMPTY % ('br0.100', 'ipv6')})
  
@@ -189,7 +187,7 @@ index e7084a9..15d4b59 100644
      def test_invalid_device_type(self):
          err = self.generate('''network:
      version: 2
-@@ -990,6 +1014,7 @@ ExecStart=/usr/bin/ovs-vsctl set Interface br0.100 external-ids:netplan=true
+@@ -990,6 +1014,7 @@ ExecStart=/usr/bin/ovs-vsctl set Interfa
          self.assert_ovs({'cleanup.service': OVS_CLEANUP % {'iface': 'cleanup'}})
          self.assert_networkd({})
  
@@ -197,6 +195,11 @@ index e7084a9..15d4b59 100644
      def test_bridge_non_ovs_bond(self):
          self.generate('''network:
      version: 2
--- 
-2.27.0
-
+@@ -1020,6 +1045,7 @@ ExecStart=/usr/bin/ovs-vsctl --may-exist
+                               'ovs-br.network': ND_EMPTY % ('ovs-br', 'ipv6'),
+                               'non-ovs-bond.netdev': '[NetDev]\nName=non-ovs-bond\nKind=bond\n'})
+ 
++    @unittest.skipIf(os.uname().machine == 'riscv64', 'missing ovs-vsctl')
+     def test_ovs_invalid_networkd_config(self):
+         err = self.generate('''network:
+   version: 2

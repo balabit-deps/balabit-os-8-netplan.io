@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2016 Canonical, Ltd.
- * Author: Martin Pitt <martin.pitt@ubuntu.com>
+ * Copyright (C) 2021 Canonical, Ltd.
+ * Author: Simon Chopin <simon.chopin@canonical.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,59 +17,10 @@
 
 #pragma once
 
-#include <uuid.h>
+#include "parse.h"
+#include <glib.h>
 #include <yaml.h>
-
-#define NETPLAN_VERSION_MIN	2
-#define NETPLAN_VERSION_MAX	3
-
-
-/* file that is currently being processed, for useful error messages */
-extern const char* current_file;
-
-/* List of "seen" ids not found in netdefs yet by the parser.
- * These are removed when it exists in this list and we reach the point of
- * creating a netdef for that id; so by the time we're done parsing the yaml
- * document it should be empty. */
-extern GHashTable *missing_id;
-extern int missing_ids_found;
-
-/****************************************************
- * Parsed definitions
- ****************************************************/
-
-typedef enum {
-    NETPLAN_DEF_TYPE_NONE,
-    /* physical devices */
-    NETPLAN_DEF_TYPE_ETHERNET,
-    NETPLAN_DEF_TYPE_WIFI,
-    NETPLAN_DEF_TYPE_MODEM,
-    /* virtual devices */
-    NETPLAN_DEF_TYPE_VIRTUAL,
-    NETPLAN_DEF_TYPE_BRIDGE = NETPLAN_DEF_TYPE_VIRTUAL,
-    NETPLAN_DEF_TYPE_BOND,
-    NETPLAN_DEF_TYPE_VLAN,
-    NETPLAN_DEF_TYPE_TUNNEL,
-    NETPLAN_DEF_TYPE_PORT,
-    /* Type fallback/passthrough */
-    NETPLAN_DEF_TYPE_NM,
-    NETPLAN_DEF_TYPE_MAX_
-} NetplanDefType;
-
-typedef enum {
-    NETPLAN_BACKEND_NONE,
-    NETPLAN_BACKEND_NETWORKD,
-    NETPLAN_BACKEND_NM,
-    NETPLAN_BACKEND_OVS,
-    NETPLAN_BACKEND_MAX_,
-} NetplanBackend;
-
-static const char* const netplan_backend_to_name[NETPLAN_BACKEND_MAX_] = {
-        [NETPLAN_BACKEND_NONE] = "none",
-        [NETPLAN_BACKEND_NETWORKD] = "networkd",
-        [NETPLAN_BACKEND_NM] = "NetworkManager",
-        [NETPLAN_BACKEND_OVS] = "OpenVSwitch",
-};
+#include <uuid.h>
 
 typedef enum {
     NETPLAN_RA_MODE_KERNEL,
@@ -97,6 +48,7 @@ struct NetplanOptionalAddressType {
     NetplanOptionalAddressFlag flag;
 };
 
+// Not strictly speaking a type, but seems fair to keep it around.
 extern struct NetplanOptionalAddressType NETPLAN_OPTIONAL_ADDRESS_TYPES[];
 
 /* Tunnel mode enum; sync with NetworkManager's DBUS API */
@@ -122,24 +74,6 @@ typedef enum {
 
     NETPLAN_TUNNEL_MODE_MAX_,
 } NetplanTunnelMode;
-
-static const char* const
-netplan_tunnel_mode_table[NETPLAN_TUNNEL_MODE_MAX_] = {
-    [NETPLAN_TUNNEL_MODE_UNKNOWN] = "unknown",
-    [NETPLAN_TUNNEL_MODE_IPIP] = "ipip",
-    [NETPLAN_TUNNEL_MODE_GRE] = "gre",
-    [NETPLAN_TUNNEL_MODE_SIT] = "sit",
-    [NETPLAN_TUNNEL_MODE_ISATAP] = "isatap",
-    [NETPLAN_TUNNEL_MODE_VTI] = "vti",
-    [NETPLAN_TUNNEL_MODE_IP6IP6] = "ip6ip6",
-    [NETPLAN_TUNNEL_MODE_IPIP6] = "ipip6",
-    [NETPLAN_TUNNEL_MODE_IP6GRE] = "ip6gre",
-    [NETPLAN_TUNNEL_MODE_VTI6] = "vti6",
-
-    [NETPLAN_TUNNEL_MODE_GRETAP] = "gretap",
-    [NETPLAN_TUNNEL_MODE_IP6GRETAP] = "ip6gretap",
-    [NETPLAN_TUNNEL_MODE_WIREGUARD] = "wireguard",
-};
 
 typedef enum {
     NETPLAN_WIFI_WOWLAN_DEFAULT           = 1<<0,
@@ -230,22 +164,14 @@ typedef union {
         char *uuid;
         char *stable_id;
         char *device;
-        GData* passthrough;
+        GData* passthrough; /* See g_datalist* functions */
     } nm;
     struct NetplanNetworkdSettings {
         char *unit;
     } networkd;
 } NetplanBackendSettings;
 
-/**
- * Represent a configuration stanza
- */
-
-struct net_definition;
-
-typedef struct net_definition NetplanNetDefinition;
-
-struct net_definition {
+struct netplan_net_definition {
     NetplanDefType type;
     NetplanBackend backend;
     char* id;
@@ -307,6 +233,7 @@ struct net_definition {
     /* these properties are only valid for physical interfaces (type < ND_VIRTUAL) */
     char* set_name;
     struct {
+        /* A glob (or tab-separated list of globs) to match a specific driver */
         char* driver;
         char* mac;
         char* original_name;
@@ -385,7 +312,7 @@ struct net_definition {
 
     /* these properties are only valid for SR-IOV NICs */
     /* netplan-feature: sriov */
-    struct net_definition* sriov_link;
+    struct netplan_net_definition* sriov_link;
     gboolean sriov_vlan_filter;
     guint sriov_explicit_vf_count;
 
@@ -398,9 +325,31 @@ struct net_definition {
     char* filename;
     /* it cannot be in the tunnel struct: https://github.com/canonical/netplan/pull/206 */
     guint tunnel_ttl;
-  
+
     /* netplan-feature: activation-mode */
-    char* activation_mode;  
+    char* activation_mode;
+
+    /* configure without carrier */
+    gboolean ignore_carrier;
+
+    /* offload options */
+    gboolean receive_checksum_offload;
+    gboolean transmit_checksum_offload;
+    gboolean tcp_segmentation_offload;
+    gboolean tcp6_segmentation_offload;
+    gboolean generic_segmentation_offload;
+    gboolean generic_receive_offload;
+    gboolean large_receive_offload;
+
+    struct private_netdef_data* _private;
+
+    /* netplan-feature: eswitch-mode */
+    char* embedded_switch_mode;
+    gboolean sriov_delay_virtual_functions_rebind;
+};
+
+struct private_netdef_data {
+    GHashTable* dirty_fields;
 };
 
 typedef enum {
@@ -410,13 +359,6 @@ typedef enum {
     NETPLAN_WIFI_MODE_OTHER,
     NETPLAN_WIFI_MODE_MAX_
 } NetplanWifiMode;
-
-static const char* const netplan_wifi_mode_to_str[NETPLAN_WIFI_MODE_MAX_] = {
-    [NETPLAN_WIFI_MODE_INFRASTRUCTURE] = "infrastructure",
-    [NETPLAN_WIFI_MODE_ADHOC] = "adhoc",
-    [NETPLAN_WIFI_MODE_AP] = "ap",
-    [NETPLAN_WIFI_MODE_OTHER] = NULL,
-};
 
 typedef struct {
     char *endpoint;
@@ -451,15 +393,6 @@ typedef struct {
 
     NetplanBackendSettings backend_settings;
 } NetplanWifiAccessPoint;
-
-#define NETPLAN_ADVERTISED_RECEIVE_WINDOW_UNSPEC 0
-#define NETPLAN_CONGESTION_WINDOW_UNSPEC 0
-#define NETPLAN_MTU_UNSPEC 0
-#define NETPLAN_METRIC_UNSPEC G_MAXUINT
-#define NETPLAN_ROUTE_TABLE_UNSPEC 0
-#define NETPLAN_IP_RULE_PRIO_UNSPEC G_MAXUINT
-#define NETPLAN_IP_RULE_FW_MARK_UNSPEC 0
-#define NETPLAN_IP_RULE_TOS_UNSPEC G_MAXUINT
 
 typedef struct {
     guint family;
@@ -497,21 +430,98 @@ typedef struct {
     guint tos;
 } NetplanIPRule;
 
-/* Written/updated by parse_yaml(): char* id →  net_definition */
-extern GHashTable* netdefs;
-extern GList* netdefs_ordered;
-extern NetplanOVSSettings ovs_settings_global;
+struct netplan_state {
+    /* Since both netdefs and netdefs_ordered store pointers to the same elements,
+     * we consider that only netdefs_ordered is owner of this data. One should not
+     * free() objects obtained from netdefs, and proper care should be taken to remove
+     * any reference of an object in netdefs when destroying it from netdefs_ordered.
+     */
+    GHashTable *netdefs;
+    GList *netdefs_ordered;
+    NetplanBackend backend;
+    NetplanOVSSettings ovs_settings;
+};
 
-/****************************************************
- * Functions
- ****************************************************/
+struct netplan_parser {
+    yaml_document_t doc;
+    /* Netplan definitions that have already been processed.
+     * Weak references to the nedefs */
+    GHashTable* parsed_defs;
+    /* Same definitions, stored in the order of processing.
+     * Owning structure for the netdefs */
+    GList* ordered;
+    NetplanBackend global_backend;
+    NetplanOVSSettings global_ovs_settings;
 
-gboolean netplan_parse_yaml(const char* filename, GError** error);
-GHashTable* netplan_finish_parse(GError** error);
-guint netplan_clear_netdefs();
-NetplanBackend netplan_get_global_backend();
-const char* tunnel_mode_to_string(NetplanTunnelMode mode);
-NetplanNetDefinition* netplan_netdef_new(const char* id, NetplanDefType type, NetplanBackend renderer);
+    /* Data currently being processed */
+    struct {
+        /* Refs to objects allocated elsewhere */
+        NetplanNetDefinition* netdef;
+        NetplanAuthenticationSettings *auth;
 
-void process_input_file(const char* f);
-gboolean process_yaml_hierarchy(const char* rootdir);
+        /* Owned refs, not yet referenced anywhere */
+        NetplanWifiAccessPoint *access_point;
+        NetplanWireguardPeer* wireguard_peer;
+        NetplanAddressOptions* addr_options;
+        NetplanIPRoute* route;
+        NetplanIPRule* ip_rule;
+        const char *filename;
+
+        /* Plain old data representing the backend for which we are
+         * currently parsing. Not necessarily the same as the global
+         * backend. */
+        NetplanBackend backend;
+    } current;
+
+    /* List of "seen" ids not found in netdefs yet by the parser.
+     * These are removed when it exists in this list and we reach the point of
+     * creating a netdef for that id; so by the time we're done parsing the yaml
+     * document it should be empty.
+     *
+     * Keys are not owned, but the values are. Should be created with NULL and g_free
+     * destructors, respectively, so that the cleanup is automatic at destruction.
+     */
+    GHashTable* missing_id;
+
+    /* Set of IDs in currently parsed YAML file, for being able to detect
+     * "duplicate ID within one file" vs. allowing a drop-in to override/amend an
+     * existing definition.
+     *
+     * Appears to be unused?
+     * */
+    GHashTable* ids_in_file;
+    int missing_ids_found;
+};
+
+#define NETPLAN_ADVERTISED_RECEIVE_WINDOW_UNSPEC 0
+#define NETPLAN_CONGESTION_WINDOW_UNSPEC 0
+#define NETPLAN_MTU_UNSPEC 0
+#define NETPLAN_METRIC_UNSPEC G_MAXUINT
+#define NETPLAN_ROUTE_TABLE_UNSPEC 0
+#define NETPLAN_IP_RULE_PRIO_UNSPEC G_MAXUINT
+#define NETPLAN_IP_RULE_FW_MARK_UNSPEC 0
+#define NETPLAN_IP_RULE_TOS_UNSPEC G_MAXUINT
+
+void
+reset_netdef(NetplanNetDefinition* netdef, NetplanDefType type, NetplanBackend renderer);
+
+void
+reset_ovs_settings(NetplanOVSSettings *settings);
+
+void
+access_point_clear(NetplanWifiAccessPoint** ap, NetplanBackend backend);
+
+void
+wireguard_peer_clear(NetplanWireguardPeer** peer);
+
+void
+address_options_clear(NetplanAddressOptions** options);
+
+void
+ip_rule_clear(NetplanIPRule** rule);
+
+void
+route_clear(NetplanIPRoute** route);
+
+gboolean
+netplan_state_has_nondefault_globals(const NetplanState* np_state);

@@ -22,7 +22,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import sys
+import signal
 import subprocess
+import time
 import unittest
 
 from base import IntegrationTestsBase, test_backends
@@ -79,6 +81,42 @@ class TestNetworkd(IntegrationTestsBase, _CommonTests):
         self.assert_iface_up('mybond', ['inet 192.168.5.[0-9]+/24'])
         with open('/sys/class/net/mybond/bonding/slaves') as f:
             self.assertIn(self.dev_e_client, f.read().strip())
+
+    def test_try_accept_lp1949095(self):
+        with open(self.config, 'w') as f:
+            f.write('''network:
+  renderer: %(r)s
+  version: 2''' % {'r': self.backend})
+        p = subprocess.Popen(['netplan', 'try'], bufsize=1, universal_newlines=True,
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        time.sleep(2)
+        p.send_signal(signal.SIGUSR1)
+        out, err = p.communicate()
+        p.wait(10)
+        self.assertEqual('', err)
+        self.assertNotIn('An error occurred:', out)
+        self.assertRegex(out.strip(), r'Do you want to keep these settings\?\n\n\n'
+r'Press ENTER before the timeout to accept the new configuration\n\n\n'
+r'(Changes will revert in \d+ seconds\n)+'
+r'Configuration accepted\.')
+
+    def test_try_reject_lp1949095(self):
+        with open(self.config, 'w') as f:
+            f.write('''network:
+  renderer: %(r)s
+  version: 2''' % {'r': self.backend})
+        p = subprocess.Popen(['netplan', 'try'], bufsize=1, universal_newlines=True,
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        time.sleep(2)
+        p.send_signal(signal.SIGINT)
+        out, err = p.communicate()
+        p.wait(10)
+        self.assertEqual('', err)
+        self.assertNotIn('An error occurred:', out)
+        self.assertRegex(out.strip(), r'Do you want to keep these settings\?\n\n\n'
+r'Press ENTER before the timeout to accept the new configuration\n\n\n'
+r'(Changes will revert in \d+ seconds\n)+'
+r'Reverting\.')
 
 
 @unittest.skipIf("NetworkManager" not in test_backends,

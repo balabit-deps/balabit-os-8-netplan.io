@@ -70,7 +70,7 @@ class IntegrationTestsBase(unittest.TestCase):
         # ensure NM can manage our fake eths
         os.makedirs('/run/udev/rules.d', exist_ok=True)
         with open('/run/udev/rules.d/99-nm-veth-test.rules', 'w') as f:
-            f.write('ENV{ID_NET_DRIVER}=="veth", ENV{INTERFACE}=="eth42|eth43", ENV{NM_UNMANAGED}="0"\n')
+            f.write('ENV{ID_NET_DRIVER}=="veth", ENV{INTERFACE}=="eth42|eth43|iface1|iface2", ENV{NM_UNMANAGED}="0"\n')
         subprocess.check_call(['udevadm', 'control', '--reload'])
 
         os.makedirs('/etc/NetworkManager/conf.d', exist_ok=True)
@@ -293,11 +293,14 @@ class IntegrationTestsBase(unittest.TestCase):
         if 'bond' not in iface:
             self.assertIn('state UP', out)
 
-    def generate_and_settle(self, wait_interfaces=None):
+    def generate_and_settle(self, wait_interfaces=None, state_dir=None):
         '''Generate config, launch and settle NM and networkd'''
 
         # regenerate netplan config
-        out = subprocess.check_output(['netplan', 'apply'], stderr=subprocess.STDOUT, universal_newlines=True)
+        cmd = ['netplan', 'apply']
+        if state_dir:
+            cmd = cmd + ['--state', state_dir]
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, universal_newlines=True)
         if 'Run \'systemctl daemon-reload\' to reload units.' in out:
             self.fail('systemd units changed without reload')
         # start NM so that we can verify that it does not manage anything
@@ -321,6 +324,10 @@ class IntegrationTestsBase(unittest.TestCase):
     def state(self, iface, state):
         '''Tell generate_and_settle() to wait for a specific state'''
         return iface + '/' + state
+
+    def state_up(self, iface):
+        '''Tell generate_and_settle() to wait for the interface to be brought UP'''
+        return self.state(iface, 'state UP')
 
     def state_dhcp4(self, iface):
         '''Tell generate_and_settle() to wait for assignment of an IP4 address from DHCP'''
@@ -356,6 +363,7 @@ class IntegrationTestsBase(unittest.TestCase):
             if expected_output in out:
                 break
             sys.stdout.write('.')  # waiting indicator
+            sys.stdout.flush()
             time.sleep(1)
         else:
             subprocess.call(cmd)  # print output of the failed command

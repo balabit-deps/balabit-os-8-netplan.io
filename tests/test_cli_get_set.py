@@ -18,28 +18,14 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import sys
 import unittest
 import tempfile
-import io
 import shutil
+import glob
 
-from contextlib import redirect_stdout
-from netplan.cli.core import Netplan
+import yaml
 
-
-def _call_cli(args):
-    old_sys_argv = sys.argv
-    sys.argv = [old_sys_argv[0]] + args
-    try:
-        f = io.StringIO()
-        with redirect_stdout(f):
-            Netplan().main()
-            return f.getvalue()
-    except Exception as e:
-        return e
-    finally:
-        sys.argv = old_sys_argv
+from tests.test_utils import call_cli
 
 
 class TestSet(unittest.TestCase):
@@ -55,7 +41,8 @@ class TestSet(unittest.TestCase):
 
     def _set(self, args):
         args.insert(0, 'set')
-        return _call_cli(args + ['--root-dir', self.workdir.name])
+        out = call_cli(args + ['--root-dir', self.workdir.name])
+        self.assertEqual(out, '', msg='netplan set returned unexpected output')
 
     def test_set_scalar(self):
         self._set(['ethernets.eth0.dhcp4=true'])
@@ -110,20 +97,67 @@ class TestSet(unittest.TestCase):
             self.assertEquals('network:\n  ethernets:\n    eth0:\n      dhcp4: true\n', f.read())
 
     def test_set_empty_origin_hint(self):
-        err = self._set(['ethernets.eth0.dhcp4=true', '--origin-hint='])
-        self.assertIsInstance(err, Exception)
-        self.assertIn('Invalid/empty origin-hint', str(err))
+        with self.assertRaises(Exception) as context:
+            self._set(['ethernets.eth0.dhcp4=true', '--origin-hint='])
+        self.assertTrue('Invalid/empty origin-hint' in str(context.exception))
+
+    def test_set_empty_hint_file(self):
+        empty_file = os.path.join(self.workdir.name, 'etc', 'netplan', '00-empty.yaml')
+        open(empty_file, 'w').close()  # touch 00-empty.yaml
+        self._set(['ethernets.eth0.dhcp4=true', '--origin-hint=00-empty'])
+        self.assertTrue(os.path.isfile(empty_file))
+        with open(empty_file, 'r') as f:
+            self.assertIn('network:\n  ethernets:\n    eth0:\n      dhcp4: true', f.read())
+
+    def test_set_empty_hint_file_whitespace(self):
+        empty_file = os.path.join(self.workdir.name, 'etc', 'netplan', '00-empty.yaml')
+        with open(empty_file, 'w') as f:
+            f.write('\n')  # echo "" > 00-empty.yaml
+        self._set(['ethernets.eth0=null', '--origin-hint=00-empty'])
+        self.assertFalse(os.path.isfile(empty_file))
+
+    def test_set_network_null_hint(self):
+        not_a_file = os.path.join(self.workdir.name, 'etc', 'netplan', '00-no-exist.yaml')
+        self._set(['network=null', '--origin-hint=00-no-exist'])
+        self.assertFalse(os.path.isfile(not_a_file))
+
+    def test_unset_non_existing_hint(self):
+        not_a_file = os.path.join(self.workdir.name, 'etc', 'netplan', '00-no-exist.yaml')
+        self._set(['network.ethernets=null', '--origin-hint=00-no-exist'])
+        self.assertFalse(os.path.isfile(not_a_file))
+
+    def test_set_network_null_hint_rm(self):
+        some_hint = os.path.join(self.workdir.name, 'etc', 'netplan', '00-some-hint.yaml')
+        with open(some_hint, 'w') as f:
+            f.write('network: {ethernets: {eth0: {dhcp4: true}}}')
+        with open(self.path, 'w') as f:
+            f.write('network: {version: 2}')
+        self._set(['network=null', '--origin-hint=00-some-hint'])
+        self.assertFalse(os.path.isfile(some_hint))  # the hint file is deleted
+        self.assertTrue(os.path.isfile(self.path))   # any other YAML still exists
+
+    def test_set_network_null_global(self):
+        some_hint = os.path.join(self.workdir.name, 'etc', 'netplan', '00-some-hint.yaml')
+        with open(some_hint, 'w') as f:
+            f.write('network: {ethernets: {eth0: {dhcp4: true}}}')
+        with open(self.path, 'w') as f:
+            f.write('network: {version: 2}')
+        self._set(['network=null'])
+        any_yaml = glob.glob(os.path.join(self.workdir.name, 'etc', 'netplan', '*.yaml'))
+        self.assertEqual(any_yaml, [])
+        self.assertFalse(os.path.isfile(self.path))
+        self.assertFalse(os.path.isfile(some_hint))
 
     def test_set_invalid(self):
-        err = self._set(['xxx.yyy=abc'])
-        self.assertIsInstance(err, Exception)
-        self.assertIn('unknown key \'xxx\'\n  xxx:\n', str(err))
+        with self.assertRaises(Exception) as context:
+            self._set(['xxx.yyy=abc'])
+        self.assertIn('unknown key \'xxx\'\n  xxx:\n', str(context.exception))
         self.assertFalse(os.path.isfile(self.path))
 
     def test_set_invalid_validation(self):
-        err = self._set(['ethernets.eth0.set-name=myif0'])
-        self.assertIsInstance(err, Exception)
-        self.assertIn('eth0: \'set-name:\' requires \'match:\' properties', str(err))
+        with self.assertRaises(Exception) as context:
+            self._set(['ethernets.eth0.set-name=myif0'])
+        self.assertIn('eth0: \'set-name:\' requires \'match:\' properties', str(context.exception))
         self.assertFalse(os.path.isfile(self.path))
 
     def test_set_invalid_validation2(self):
@@ -134,9 +168,9 @@ class TestSet(unittest.TestCase):
       mode: sit
       local: 1.2.3.4
       remote: 5.6.7.8''')
-        err = self._set(['tunnels.tun0.keys.input=12345'])
-        self.assertIsInstance(err, Exception)
-        self.assertIn('tun0: \'input-key\' is not required for this tunnel type', str(err))
+        with self.assertRaises(Exception) as context:
+            self._set(['tunnels.tun0.keys.input=12345'])
+        self.assertIn('tun0: \'input-key\' is not required for this tunnel type', str(context.exception))
 
     def test_set_append(self):
         with open(self.path, 'w') as f:
@@ -195,6 +229,20 @@ class TestSet(unittest.TestCase):
             self.assertNotIn('addresses:', out)
             self.assertNotIn('eth0:', out)
 
+    def test_set_delete_subtree(self):
+        with open(self.path, 'w') as f:
+            f.write('''network:\n  version: 2\n  renderer: NetworkManager
+  ethernets:
+    eth0: {addresses: [1.2.3.4/24]}''')
+        self._set(['network.ethernets=null'])
+        self.assertTrue(os.path.isfile(self.path))
+        with open(self.path, 'r') as f:
+            out = f.read()
+        self.assertIn('network:\n', out)
+        self.assertIn(' version: 2\n', out)
+        self.assertIn(' renderer: NetworkManager\n', out)
+        self.assertNotIn('ethernets:', out)
+
     def test_set_delete_file(self):
         with open(self.path, 'w') as f:
             f.write('''network:
@@ -210,8 +258,7 @@ class TestSet(unittest.TestCase):
   version: 2
   ethernets:
     ens3: {dhcp4: yes}''')
-        out = self._set(['network.ethernets.ens3=NULL'])
-        print(out, flush=True)
+        self._set(['network.ethernets.ens3=NULL'])
         # The file should be deleted if only "network: {version: 2}" is left
         self.assertFalse(os.path.isfile(self.path))
 
@@ -220,20 +267,15 @@ class TestSet(unittest.TestCase):
             f.write('''network:\n  version: 2\n  renderer: NetworkManager
   ethernets:
     eth0: {addresses: [1.2.3.4]}''')
-        err = self._set(['ethernets.eth0.addresses'])
-        self.assertIsInstance(err, Exception)
-        self.assertEquals('Invalid value specified', str(err))
+        with self.assertRaises(Exception) as context:
+            self._set(['ethernets.eth0.addresses'])
+        self.assertEquals('Invalid value specified', str(context.exception))
 
     def test_set_escaped_dot(self):
         self._set([r'ethernets.eth0\.123.dhcp4=false'])
         self.assertTrue(os.path.isfile(self.path))
         with open(self.path, 'r') as f:
             self.assertIn('network:\n  ethernets:\n    eth0.123:\n      dhcp4: false', f.read())
-
-    def test_set_invalid_input(self):
-        err = self._set([r'ethernets.eth0={dhcp4:false}'])
-        self.assertIsInstance(err, Exception)
-        self.assertEquals('Invalid input: {\'network\': {\'ethernets\': {\'eth0\': {\'dhcp4:false\': None}}}}', str(err))
 
     def test_set_override_existing_file(self):
         override = os.path.join(self.workdir.name, 'etc', 'netplan', 'some-file.yaml')
@@ -295,7 +337,7 @@ class TestGet(unittest.TestCase):
 
     def _get(self, args):
         args.insert(0, 'get')
-        return _call_cli(args + ['--root-dir', self.workdir.name])
+        return call_cli(args + ['--root-dir', self.workdir.name])
 
     def test_get_scalar(self):
         with open(self.path, 'w') as f:
@@ -314,12 +356,8 @@ class TestGet(unittest.TestCase):
     ens3:
       dhcp4: yes
       addresses: [1.2.3.4/24, 5.6.7.8/24]''')
-        out = self._get(['ethernets'])
-        self.assertIn('''ens3:
-  addresses:
-  - 1.2.3.4/24
-  - 5.6.7.8/24
-  dhcp4: true''', out)
+        out = yaml.safe_load(self._get(['ethernets']))
+        self.assertDictEqual({'ens3': {'addresses': ['1.2.3.4/24', '5.6.7.8/24'], 'dhcp4': True}}, out)
 
     def test_get_modems(self):
         with open(self.path, 'w') as f:
@@ -331,13 +369,13 @@ class TestGet(unittest.TestCase):
       pin: 1234
       dhcp4: yes
       addresses: [1.2.3.4/24, 5.6.7.8/24]''')
-        out = self._get(['modems.wwan0'])
-        self.assertIn('''addresses:
-- 1.2.3.4/24
-- 5.6.7.8/24
-apn: internet
-dhcp4: true
-pin: 1234''', out)
+        out = yaml.safe_load(self._get(['modems.wwan0']))
+        self.assertDictEqual({
+                'addresses': ['1.2.3.4/24', '5.6.7.8/24'],
+                'apn': 'internet',
+                'dhcp4': True,
+                'pin': '1234'
+            }, out)
 
     def test_get_sequence(self):
         with open(self.path, 'w') as f:
@@ -345,8 +383,8 @@ pin: 1234''', out)
   version: 2
   ethernets:
     ens3: {addresses: [1.2.3.4/24, 5.6.7.8/24]}''')
-        out = self._get(['network.ethernets.ens3.addresses'])
-        self.assertIn('- 1.2.3.4/24\n- 5.6.7.8/24', out)
+        out = yaml.safe_load(self._get(['network.ethernets.ens3.addresses']))
+        self.assertSequenceEqual(['1.2.3.4/24', '5.6.7.8/24'], out)
 
     def test_get_null(self):
         with open(self.path, 'w') as f:
@@ -364,7 +402,7 @@ pin: 1234''', out)
   ethernets:
     eth0.123: {dhcp4: yes}''')
         out = self._get([r'ethernets.eth0\.123.dhcp4'])
-        self.assertEquals('true\n', out)
+        self.assertEqual('true\n', out)
 
     def test_get_all(self):
         with open(self.path, 'w') as f:
@@ -372,15 +410,37 @@ pin: 1234''', out)
   version: 2
   ethernets:
     eth0: {dhcp4: yes}''')
-        out = self._get([])
-        self.assertEquals('''network:
-  ethernets:
-    eth0:
-      dhcp4: true
-  version: 2\n''', out)
+        out = yaml.safe_load(self._get([]))
+        self.assertDictEqual({'network': {
+                'ethernets': {'eth0': {'dhcp4': True}},
+                'version': 2,
+                }
+            }, out)
 
     def test_get_network(self):
         with open(self.path, 'w') as f:
             f.write('network:\n  version: 2\n  renderer: NetworkManager')
-        out = self._get(['network'])
-        self.assertEquals('renderer: NetworkManager\nversion: 2\n', out)
+        out = yaml.safe_load(self._get(['network']))
+        self.assertDictEqual({'renderer': 'NetworkManager', 'version': 2}, out)
+
+    def test_get_bad_network(self):
+        with open(self.path, 'w') as f:
+            f.write('network:\n  version: 2\n  renderer: NetworkManager')
+        out = yaml.safe_load(self._get(['networkINVALID']))
+        self.assertIsNone(out)
+
+    def test_get_yaml_document_end_failure(self):
+        with open(self.path, 'w') as f:
+            f.write('''network:
+  ethernets:
+    eth0:
+      match:
+        name: "test"
+      mtu: 9000
+      set-name: "yo"
+      dhcp4: true
+      virtual-function-count: 2
+''')
+        # this shall not throw any (YAML DOCUMENT-END) exception
+        out = yaml.safe_load(self._get(['ethernets.eth0']))
+        self.assertListEqual(['match', 'dhcp4', 'set-name', 'mtu', 'virtual-function-count'], list(out))

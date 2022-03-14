@@ -7,33 +7,29 @@ Subject: Mute gateway4/6 deprecation warnings
  tests/generator/test_common.py | 6 ++----
  2 files changed, 2 insertions(+), 8 deletions(-)
 
-diff --git a/src/parse.c b/src/parse.c
-index 09cd1e2..20ce034 100644
 --- a/src/parse.c
 +++ b/src/parse.c
-@@ -1118,8 +1118,6 @@ handle_gateway4(yaml_document_t* doc, yaml_node_t* node, const void* _, GError**
-     if (!is_ip4_address(scalar(node)))
-         return yaml_error(node, error, "invalid IPv4 address '%s'", scalar(node));
-     set_str_if_null(cur_netdef->gateway4, scalar(node));
+@@ -1130,8 +1130,6 @@ handle_gateway4(NetplanParser* npp, yaml
+         return yaml_error(npp, node, error, "invalid IPv4 address '%s'", scalar(node));
+     set_str_if_null(npp->current.netdef->gateway4, scalar(node));
+     mark_data_as_dirty(npp, &npp->current.netdef->gateway4);
 -    g_warning("`gateway4` has been deprecated, use default routes instead.\n"
 -              "See the 'Default routes' section of the documentation for more details.");
      return TRUE;
  }
  
-@@ -1129,8 +1127,6 @@ handle_gateway6(yaml_document_t* doc, yaml_node_t* node, const void* _, GError**
-     if (!is_ip6_address(scalar(node)))
-         return yaml_error(node, error, "invalid IPv6 address '%s'", scalar(node));
-     set_str_if_null(cur_netdef->gateway6, scalar(node));
+@@ -1142,8 +1140,6 @@ handle_gateway6(NetplanParser* npp, yaml
+         return yaml_error(npp, node, error, "invalid IPv6 address '%s'", scalar(node));
+     set_str_if_null(npp->current.netdef->gateway6, scalar(node));
+     mark_data_as_dirty(npp, &npp->current.netdef->gateway6);
 -    g_warning("`gateway6` has been deprecated, use default routes instead.\n"
 -              "See the 'Default routes' section of the documentation for more details.");
      return TRUE;
  }
  
-diff --git a/tests/generator/test_common.py b/tests/generator/test_common.py
-index 7bdb4b4..baf3f9f 100644
 --- a/tests/generator/test_common.py
 +++ b/tests/generator/test_common.py
-@@ -556,13 +556,12 @@ UseMTU=true
+@@ -572,13 +572,12 @@ ConfigureWithoutCarrier=yes
  '''})
  
      def test_gateway4(self):
@@ -48,7 +44,7 @@ index 7bdb4b4..baf3f9f 100644
          self.assert_networkd({'engreen.network': '''[Match]
  Name=engreen
  
-@@ -573,13 +572,12 @@ Gateway=192.168.14.1
+@@ -589,13 +588,12 @@ Gateway=192.168.14.1
  '''})
  
      def test_gateway6(self):
