@@ -1,5 +1,3 @@
-#!/usr/bin/python3
-#
 # Copyright (C) 2018-2020 Canonical, Ltd.
 # Author: Mathieu Trudel-Lapierre <mathieu.trudel-lapierre@canonical.com>
 # Author: Łukasz 'sil2100' Zemczak <lukasz.zemczak@canonical.com>
@@ -20,43 +18,14 @@
 import sys
 import os
 import logging
-import fnmatch
 import argparse
 import subprocess
 import netifaces
+import fnmatch
 import re
-import ctypes
-import ctypes.util
 
 NM_SERVICE_NAME = 'NetworkManager.service'
 NM_SNAP_SERVICE_NAME = 'snap.network-manager.networkmanager.service'
-
-
-class _GError(ctypes.Structure):
-    _fields_ = [("domain", ctypes.c_uint32), ("code", ctypes.c_int), ("message", ctypes.c_char_p)]
-
-
-lib = ctypes.CDLL(ctypes.util.find_library('netplan'))
-lib.netplan_parse_yaml.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.POINTER(_GError))]
-lib.netplan_get_filename_by_id.restype = ctypes.c_char_p
-
-
-def netplan_parse(path):
-    # Clear old NetplanNetDefinitions from libnetplan memory
-    lib.netplan_clear_netdefs()
-    err = ctypes.POINTER(_GError)()
-    ret = bool(lib.netplan_parse_yaml(path.encode(), ctypes.byref(err)))
-    if not ret:
-        raise Exception(err.contents.message.decode('utf-8'))
-    lib.netplan_finish_parse(ctypes.byref(err))
-    if err:
-        raise Exception(err.contents.message.decode('utf-8'))
-    return True
-
-
-def netplan_get_filename_by_id(netdef_id, rootdir):
-    res = lib.netplan_get_filename_by_id(netdef_id.encode(), rootdir.encode())
-    return res.decode('utf-8') if res else None
 
 
 def get_generator_path():
@@ -188,9 +157,15 @@ def is_interface_matching_name(interface, match_name):
 
 
 def is_interface_matching_driver_name(interface, match_driver):
+    driver_globs = match_driver
+    if isinstance(driver_globs, str):
+        driver_globs = [match_driver]
     driver_name = get_interface_driver_name(interface)
     # globs are supported
-    return fnmatch.fnmatchcase(driver_name, match_driver)
+    return any(
+        fnmatch.fnmatchcase(driver_name, pattern)
+        for pattern in driver_globs
+    )
 
 
 def is_interface_matching_macaddress(interface, match_mac):

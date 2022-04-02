@@ -151,6 +151,12 @@ class TestConfigManager(unittest.TestCase):
         self.assertEquals(2, self.configmanager.version)
         self.assertEquals('networkd', self.configmanager.renderer)
         self.assertIn('fallback', self.configmanager.nm_devices)
+        self.assertIn('vlan2', self.configmanager.virtual_interfaces)
+        self.assertIn('br3', self.configmanager.virtual_interfaces)
+        self.assertIn('br4', self.configmanager.virtual_interfaces)
+        self.assertIn('bond5', self.configmanager.virtual_interfaces)
+        self.assertIn('bond6', self.configmanager.virtual_interfaces)
+        self.assertIn('he-ipv6', self.configmanager.virtual_interfaces)
 
     def test_parse_merging(self):
         self.configmanager.parse(extra_config=[os.path.join(self.workdir.name, "newfile_merging.yaml")])
@@ -238,6 +244,22 @@ class TestConfigManager(unittest.TestCase):
         backup_dir = self.configmanager.tempdir
         self.assertTrue(os.path.exists(backup_dir))
         self.configmanager.cleanup()
+        self.assertFalse(os.path.exists(backup_dir))
+
+    def test_destruction(self):
+        backup_dir = self.configmanager.tempdir
+        self.assertTrue(os.path.exists(backup_dir))
+        del self.configmanager
+        self.assertFalse(os.path.exists(backup_dir))
+
+    def test_cleanup_and_destruction(self):
+        backup_dir = self.configmanager.tempdir
+        self.assertTrue(os.path.exists(backup_dir))
+        self.configmanager.cleanup()
+        self.assertFalse(os.path.exists(backup_dir))
+        # This tests that the rmtree in the destructor does not throw an error
+        # if cleanup was already called
+        del self.configmanager
         self.assertFalse(os.path.exists(backup_dir))
 
     def test__copy_tree(self):

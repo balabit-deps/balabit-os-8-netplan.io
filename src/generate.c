@@ -27,7 +27,9 @@
 #include <gio/gio.h>
 
 #include "util.h"
+#include "util-internal.h"
 #include "parse.h"
+#include "names.h"
 #include "networkd.h"
 #include "nm.h"
 #include "openvswitch.h"
@@ -35,8 +37,7 @@
 
 static gchar* rootdir;
 static gchar** files;
-static gboolean any_networkd;
-static gboolean any_sriov;
+static gboolean any_networkd = FALSE;
 static gchar* mapping_iface;
 
 static GOptionEntry options[] = {
@@ -53,6 +54,32 @@ reload_udevd(void)
     g_spawn_sync(NULL, (gchar**)argv, NULL, G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 };
 
+/**
+ * Create enablement symlink for systemd-networkd.service.
+ */
+static void
+enable_networkd(const char* generator_dir)
+{
+    g_autofree char* link = g_build_path(G_DIR_SEPARATOR_S, generator_dir, "multi-user.target.wants", "systemd-networkd.service", NULL);
+    g_debug("We created networkd configuration, adding %s enablement symlink", link);
+    safe_mkdir_p_dir(link);
+    if (symlink("../systemd-networkd.service", link) < 0 && errno != EEXIST) {
+        // LCOV_EXCL_START
+        g_fprintf(stderr, "failed to create enablement symlink: %m\n");
+        exit(1);
+        // LCOV_EXCL_STOP
+    }
+
+    g_autofree char* link2 = g_build_path(G_DIR_SEPARATOR_S, generator_dir, "network-online.target.wants", "systemd-networkd-wait-online.service", NULL);
+    safe_mkdir_p_dir(link2);
+    if (symlink("/lib/systemd/system/systemd-networkd-wait-online.service", link2) < 0 && errno != EEXIST) {
+        // LCOV_EXCL_START
+        g_fprintf(stderr, "failed to create enablement symlink: %m\n");
+        exit(1);
+        // LCOV_EXCL_STOP
+    }
+}
+
 // LCOV_EXCL_START
 /* covered via 'cloud-init' integration test */
 static gboolean
@@ -67,7 +94,11 @@ check_called_just_in_time()
         gint exit_code = 0;
         g_spawn_sync(NULL, (gchar**)argv2, NULL, G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL, NULL, NULL, &exit_code, NULL);
         /* return TRUE, if network.target is not yet active */
+        #if GLIB_CHECK_VERSION (2, 70, 0)
+        return !g_spawn_check_wait_status(exit_code, NULL);
+        #else
         return !g_spawn_check_exit_status(exit_code, NULL);
+        #endif
     }
     g_free(output);
     return FALSE;
@@ -81,22 +112,8 @@ start_unit_jit(gchar *unit)
 };
 // LCOV_EXCL_STOP
 
-static void
-nd_iterator_list(gpointer value, gpointer user_data)
-{
-    NetplanNetDefinition* def = (NetplanNetDefinition*) value;
-    if (write_networkd_conf(def, (const char*) user_data))
-        any_networkd = TRUE;
-
-    write_ovs_conf(def, (const char*) user_data);
-    write_nm_conf(def, (const char*) user_data);
-    if (def->sriov_explicit_vf_count < G_MAXUINT || def->sriov_link)
-        any_sriov = TRUE;
-}
-
-
 static int
-find_interface(gchar* interface)
+find_interface(gchar* interface, GHashTable* netdefs)
 {
     GPtrArray *found;
     GFileInfo *info;
@@ -157,7 +174,7 @@ find_interface(gchar* interface)
          const NetplanNetDefinition *nd = (NetplanNetDefinition *)g_ptr_array_index (found, 0);
          g_printf("id=%s, backend=%s, set_name=%s, match_name=%s, match_mac=%s, match_driver=%s\n",
              nd->id,
-             netplan_backend_to_name[nd->backend],
+             netplan_backend_name(nd->backend),
              nd->set_name,
              nd->match.original_name,
              nd->match.mac,
@@ -171,6 +188,14 @@ exit_find:
     return ret;
 }
 
+#define CHECK_CALL(call) {\
+    if (!call) {\
+        error_code = 1; \
+        fprintf(stderr, "%s\n", error->message); \
+        goto cleanup;\
+    }\
+}
+
 int main(int argc, char** argv)
 {
     GError* error = NULL;
@@ -179,6 +204,9 @@ int main(int argc, char** argv)
     gboolean called_as_generator = (strstr(argv[0], "systemd/system-generators/") != NULL);
     g_autofree char* generator_run_stamp = NULL;
     glob_t gl;
+    int error_code = 0;
+    NetplanParser* npp = NULL;
+    NetplanState* np_state = NULL;
 
     /* Parse CLI options */
     opt_context = g_option_context_new(NULL);
@@ -193,7 +221,7 @@ int main(int argc, char** argv)
     g_option_context_add_main_entries(opt_context, options, NULL);
 
     if (!g_option_context_parse(opt_context, &argc, &argv, &error)) {
-        g_fprintf(stderr, "failed to parse options: %s\n", error->message);
+        fprintf(stderr, "failed to parse options: %s\n", error->message);
         return 1;
     }
 
@@ -209,35 +237,45 @@ int main(int argc, char** argv)
         }
     }
 
+    npp = netplan_parser_new();
     /* Read all input files */
     if (files && !called_as_generator) {
-        for (gchar** f = files; f && *f; ++f)
-            process_input_file(*f);
-    } else if (!process_yaml_hierarchy(rootdir))
-        return 1; // LCOV_EXCL_LINE
+        for (gchar** f = files; f && *f; ++f) {
+            CHECK_CALL(netplan_parser_load_yaml(npp, *f, &error));
+        }
+    } else
+        CHECK_CALL(netplan_parser_load_yaml_hierarchy(npp, rootdir, &error));
 
-    netdefs = netplan_finish_parse(&error);
-    if (error) {
-        g_fprintf(stderr, "%s\n", error->message);
-        exit(1);
-    }
+    np_state = netplan_state_new();
+    CHECK_CALL(netplan_state_import_parser_results(np_state, npp, &error));
 
     /* Clean up generated config from previous runs */
-    cleanup_networkd_conf(rootdir);
-    cleanup_nm_conf(rootdir);
-    cleanup_ovs_conf(rootdir);
-    cleanup_sriov_conf(rootdir);
+    netplan_networkd_cleanup(rootdir);
+    netplan_nm_cleanup(rootdir);
+    netplan_ovs_cleanup(rootdir);
+    netplan_sriov_cleanup(rootdir);
 
-    if (mapping_iface && netdefs)
-        return find_interface(mapping_iface);
+    if (mapping_iface && np_state->netdefs) {
+        error_code = find_interface(mapping_iface, np_state->netdefs);
+        goto cleanup;
+    }
 
     /* Generate backend specific configuration files from merged data. */
-    write_ovs_conf_finish(rootdir); // OVS cleanup unit is always written
-    if (netdefs) {
+    CHECK_CALL(netplan_state_finish_ovs_write(np_state, rootdir, &error)); // OVS cleanup unit is always written
+    if (np_state->netdefs) {
         g_debug("Generating output files..");
-        g_list_foreach (netdefs_ordered, nd_iterator_list, rootdir);
-        write_nm_conf_finish(rootdir);
-        if (any_sriov) write_sriov_conf_finish(rootdir);
+        for (GList* iterator = np_state->netdefs_ordered; iterator; iterator = iterator->next) {
+            NetplanNetDefinition* def = (NetplanNetDefinition*) iterator->data;
+            gboolean has_been_written = FALSE;
+            CHECK_CALL(netplan_netdef_write_networkd(np_state, def, rootdir, &has_been_written, &error));
+            any_networkd = any_networkd || has_been_written;
+
+            CHECK_CALL(netplan_netdef_write_ovs(np_state, def, rootdir, &has_been_written, &error));
+            CHECK_CALL(netplan_netdef_write_nm(np_state, def, rootdir, &has_been_written, &error));
+        }
+
+        CHECK_CALL(netplan_state_finish_nm_write(np_state, rootdir, &error));
+        CHECK_CALL(netplan_state_finish_sriov_write(np_state, rootdir, &error));
         /* We may have written .rules & .link files, thus we must
          * invalidate udevd cache of its config as by default it only
          * invalidates cache at most every 3 seconds. Not sure if this
@@ -249,7 +287,7 @@ int main(int argc, char** argv)
 
     /* Disable /usr/lib/NetworkManager/conf.d/10-globally-managed-devices.conf
      * (which restricts NM to wifi and wwan) if global renderer is NM */
-    if (netplan_get_global_backend() == NETPLAN_BACKEND_NM)
+    if (netplan_state_get_backend(np_state) == NETPLAN_BACKEND_NM)
         g_string_free_to_file(g_string_new(NULL), rootdir, "/run/NetworkManager/conf.d/10-globally-managed-devices.conf", NULL);
 
     if (called_as_generator) {
@@ -291,5 +329,10 @@ int main(int argc, char** argv)
         // LCOV_EXCL_STOP
     }
 
-    return 0;
+cleanup:
+    if (npp)
+        netplan_parser_clear(&npp);
+    if (np_state)
+        netplan_state_clear(&np_state);
+    return error_code;
 }

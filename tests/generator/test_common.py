@@ -555,6 +555,22 @@ RouteMetric=100
 UseMTU=true
 '''})
 
+    def test_eth_ignore_carrier_true(self):
+        self.generate('''network:
+  version: 2
+  ethernets:
+    eth0:
+      ignore-carrier: yes
+''')
+
+        self.assert_networkd({'eth0.network': '''[Match]
+Name=eth0
+
+[Network]
+LinkLocalAddressing=ipv6
+ConfigureWithoutCarrier=yes
+'''})
+
     def test_gateway4(self):
         err = self.generate('''network:
   version: 2
@@ -810,6 +826,12 @@ UseMTU=true
 
 class TestNetworkManager(TestBase):
 
+    def test_empty_conf(self):
+        self.generate('''network:
+  version: 2
+  renderer: NetworkManager''')
+        self.assert_nm({})
+
     def test_mtu_all(self):
         self.generate(textwrap.dedent("""
             network:
@@ -1026,6 +1048,7 @@ method=link-local
 
 [ipv6]
 method=auto
+ip6-privacy=0
 '''})
 
     def test_eth_dhcp4_and_6(self):
@@ -1047,6 +1070,7 @@ method=auto
 
 [ipv6]
 method=auto
+ip6-privacy=0
 '''})
 
     def test_ip6_addr_gen_mode(self):
@@ -1074,6 +1098,7 @@ method=link-local
 [ipv6]
 method=auto
 addr-gen-mode=1
+ip6-privacy=0
 ''',
                         'enblue': '''[connection]
 id=netplan-enblue
@@ -1089,6 +1114,7 @@ method=link-local
 [ipv6]
 method=auto
 addr-gen-mode=0
+ip6-privacy=0
 '''})
 
     def test_ip6_addr_gen_token(self):
@@ -1117,6 +1143,7 @@ method=link-local
 method=auto
 addr-gen-mode=0
 token=::2
+ip6-privacy=0
 ''',
                         'enblue': '''[connection]
 id=netplan-enblue
@@ -1133,6 +1160,7 @@ method=link-local
 method=auto
 addr-gen-mode=0
 token=::2
+ip6-privacy=0
 '''})
 
     def test_eth_manual_addresses(self):
@@ -1162,6 +1190,7 @@ address2=172.16.0.4/16
 [ipv6]
 method=manual
 address1=2001:FFfe::1/64
+ip6-privacy=0
 '''})
         self.assert_networkd({})
         self.assert_nm_udev(None)
@@ -1192,6 +1221,7 @@ address1=192.168.14.2/24
 [ipv6]
 method=manual
 address1=2001:FFfe::1/64
+ip6-privacy=0
 '''})
 
     def test_eth_ipv6_privacy(self):
@@ -1242,6 +1272,7 @@ gateway=192.168.14.1
 [ipv6]
 method=manual
 address1=2001:FFfe::1/64
+ip6-privacy=0
 gateway=2001:FFfe::2
 '''})
 
@@ -1276,6 +1307,7 @@ dns-search=lab;kitchen;
 
 [ipv6]
 method=manual
+ip6-privacy=0
 dns=1234::FFFF;
 dns-search=lab;kitchen;
 ''',

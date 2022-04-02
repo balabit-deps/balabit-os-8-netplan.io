@@ -23,6 +23,9 @@
 #include "parse-nm.h"
 #include "parse.h"
 #include "util.h"
+#include "types.h"
+#include "util-internal.h"
+#include "validation.h"
 
 /**
  * NetworkManager writes the alias for '802-3-ethernet' (ethernet),
@@ -44,10 +47,14 @@ type_from_str(const char* type_str)
         return NETPLAN_DEF_TYPE_BRIDGE;
     else if (!g_strcmp0(type_str, "bond"))
         return NETPLAN_DEF_TYPE_BOND;
+    /* TODO: Vlans are not yet fully supported by the keyfile parser
     else if (!g_strcmp0(type_str, "vlan"))
         return NETPLAN_DEF_TYPE_VLAN;
+    */
+    /* TODO: Tunnels are not yet supported by the keyfile parser
     else if (!g_strcmp0(type_str, "ip-tunnel") || !g_strcmp0(type_str, "wireguard"))
         return NETPLAN_DEF_TYPE_TUNNEL;
+    */
     /* Unsupported type, needs to be specified via passthrough */
     return NETPLAN_DEF_TYPE_NM;
 }
@@ -136,7 +143,7 @@ static void
 handle_bridge_uint(GKeyFile* kf, const gchar* key, NetplanNetDefinition* nd, char** dataptr) {
     if (g_key_file_get_uint64(kf, "bridge", key, NULL)) {
         nd->custom_bridging = TRUE;
-        *dataptr = g_strdup_printf("%lu", g_key_file_get_uint64(kf, "bridge", key, NULL));
+        *dataptr = g_strdup_printf("%"G_GUINT64_FORMAT, g_key_file_get_uint64(kf, "bridge", key, NULL));
         _kf_clear_key(kf, "bridge", key);
     }
 }
@@ -207,7 +214,6 @@ parse_routes(GKeyFile* kf, const gchar* group, GArray** routes_arr)
             *routes_arr = g_array_new(FALSE, TRUE, sizeof(NetplanIPRoute*));
         route = g_new0(NetplanIPRoute, 1);
         route->type = g_strdup("unicast");
-        route->scope = g_strdup("global");
         route->family = G_MAXUINT; /* 0 is a valid family ID */
         route->metric = NETPLAN_METRIC_UNSPEC; /* 0 is a valid metric */
         g_debug("%s: adding new route (kf)", key);
@@ -222,8 +228,18 @@ parse_routes(GKeyFile* kf, const gchar* group, GArray** routes_arr)
         if (split[0])
             route->to = g_strdup(split[0]); //no need to free, will stay in netdef
         /* Append gateway/via IP */
-        if (split[0] && split[1])
+        if (split[0] && split[1] &&
+            g_strcmp0(split[1], get_unspecified_address(route->family)) != 0) {
+            route->scope = g_strdup("global");
             route->via = g_strdup(split[1]); //no need to free, will stay in netdef
+        } else {
+            /* If the gateway (via) is unspecified, it means that this route is
+             * only valid on the local network (see nm-keyfile.c ->
+             * read_one_ip_address_or_route()), e.g.:
+             * ip route add NETWORK dev DEV [metric METRIC] */
+            route->scope = g_strdup("link");
+        }
+
         /* Append metric */
         if (split[0] && split[1] && split[2] && strtoul(split[2], NULL, 10) != NETPLAN_METRIC_UNSPEC)
             route->metric = strtoul(split[2], NULL, 10);
@@ -285,12 +301,15 @@ parse_dhcp_overrides(GKeyFile* kf, const gchar* group, NetplanDHCPOverrides* dat
 static void
 parse_search_domains(GKeyFile* kf, const gchar* group, GArray** domains_arr)
 {
+    /* Keep "dns-search" as fallback/passthrough, as netplan cannot
+     * differentiate between ipv4.dns-search and ipv6.dns-search */
     g_assert(domains_arr);
     gsize len = 0;
     gchar **split = g_key_file_get_string_list(kf, group, "dns-search", &len, NULL);
     if (split) {
         if (len == 0) {
-            _kf_clear_key(kf, group, "dns-search");
+            //do not clear "dns-search", keep as fallback
+            //_kf_clear_key(kf, group, "dns-search");
             return;
         }
         if (!*domains_arr)
@@ -299,7 +318,8 @@ parse_search_domains(GKeyFile* kf, const gchar* group, GArray** domains_arr)
             char* s = g_strdup(split[i]); //no need to free, will stay in netdef
             g_array_append_val(*domains_arr, s);
         }
-        _kf_clear_key(kf, group, "dns-search");
+        //do not clear "dns-search", keep as fallback
+        //_kf_clear_key(kf, group, "dns-search");
         g_strfreev(split);
     }
 }
@@ -415,7 +435,7 @@ read_passthrough(GKeyFile* kf, GData** list)
  * @filename: full path to the NetworkManager keyfile
  */
 gboolean
-netplan_parse_keyfile(const char* filename, GError** error)
+netplan_parser_load_keyfile(NetplanParser* npp, const char* filename, GError** error)
 {
     g_autofree gchar *nd_id = NULL;
     g_autofree gchar *uuid = NULL;
@@ -465,7 +485,7 @@ netplan_parse_keyfile(const char* filename, GError** error)
     } else
         nd_id = g_strconcat("NM-", uuid, NULL);
     g_free(tmp_str);
-    nd = netplan_netdef_new(nd_id, nd_type, NETPLAN_BACKEND_NM);
+    nd = netplan_netdef_new(npp, nd_id, nd_type, NETPLAN_BACKEND_NM);
 
     /* Handle uuid & NM name/id */
     nd->backend_settings.nm.uuid = g_strdup(uuid);
@@ -477,13 +497,21 @@ netplan_parse_keyfile(const char* filename, GError** error)
     if (nd_type == NETPLAN_DEF_TYPE_NM)
         goto only_passthrough; //do not try to handle any keys for connections types unknown to netplan
 
+    /* Handle some differing NM/netplan defaults */
+    tmp_str = g_key_file_get_string(kf, "ipv6", "method", NULL);
+    if ( g_key_file_has_group(kf, "ipv6") && g_strcmp0(tmp_str, "ignore") != 0 &&
+        !g_key_file_has_key(kf, "ipv6", "ip6-privacy", NULL)) {
+        /* put NM's default into passthrough, as this is not currently supported by netplan */
+        g_key_file_set_integer(kf, "ipv6", "ip6-privacy", -1);
+    }
+    g_free(tmp_str);
+
     /* remove supported values from passthrough, which have been handled */
     if (   nd_type == NETPLAN_DEF_TYPE_ETHERNET
         || nd_type == NETPLAN_DEF_TYPE_WIFI
         || nd_type == NETPLAN_DEF_TYPE_MODEM
         || nd_type == NETPLAN_DEF_TYPE_BRIDGE
-        || nd_type == NETPLAN_DEF_TYPE_BOND
-        || nd_type == NETPLAN_DEF_TYPE_VLAN)
+        || nd_type == NETPLAN_DEF_TYPE_BOND)
         _kf_clear_key(kf, "connection", "type");
 
     /* Handle match: Netplan usually defines a connection per interface, while
@@ -536,6 +564,21 @@ netplan_parse_keyfile(const char* filename, GError** error)
     }
     g_free(tmp_str);
     handle_generic_str(kf, "ipv6", "token", &nd->ip6_addr_gen_token);
+
+    /* ip6-privacy is not fully supported, NM supports additional modes, like -1 or 1
+     * handle known modes, but keep any unsupported "ip6-privacy" value in passthrough */
+    if (g_key_file_has_group(kf, "ipv6")) {
+        if (g_key_file_has_key(kf, "ipv6", "ip6-privacy", NULL)) {
+            int ip6_privacy = g_key_file_get_integer(kf, "ipv6", "ip6-privacy", NULL);
+            if (ip6_privacy == 0) {
+                nd->ip6_privacy = FALSE;
+                _kf_clear_key(kf, "ipv6", "ip6-privacy");
+            } else if (ip6_privacy == 2) {
+                nd->ip6_privacy = TRUE;
+                _kf_clear_key(kf, "ipv6", "ip6-privacy");
+            }
+        }
+    }
 
     /* Modem parameters
      * NM differentiates between GSM and CDMA connections, while netplan
@@ -721,8 +764,8 @@ netplan_parse_keyfile(const char* filename, GError** error)
 
         /* Last: handle passthrough for everything left in the keyfile
          *       Also, transfer backend_settings from netdef to AP */
-        ap->backend_settings.nm.uuid = nd->backend_settings.nm.uuid;
-        ap->backend_settings.nm.name = nd->backend_settings.nm.name;
+        ap->backend_settings.nm.uuid = g_strdup(nd->backend_settings.nm.uuid);
+        ap->backend_settings.nm.name = g_strdup(nd->backend_settings.nm.name);
         /* No need to clear nm.uuid & nm.name from def->backend_settings,
          * as we have only one AP. */
         read_passthrough(kf, &ap->backend_settings.nm.passthrough);
@@ -733,5 +776,11 @@ only_passthrough:
     }
 
     g_key_file_free(kf);
+
+    /* validate definition-level conditions */
+    if (!npp->missing_id)
+        npp->missing_id = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, g_free);
+    if (!validate_netdef_grammar(npp, nd, NULL, error))
+        return FALSE;
     return TRUE;
 }

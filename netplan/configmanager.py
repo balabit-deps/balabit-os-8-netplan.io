@@ -63,6 +63,16 @@ class ConfigManager(object):
         return interfaces
 
     @property
+    def virtual_interfaces(self):
+        interfaces = {}
+        # what about ovs_ports?
+        interfaces.update(self.bridges)
+        interfaces.update(self.bonds)
+        interfaces.update(self.tunnels)
+        interfaces.update(self.vlans)
+        return interfaces
+
+    @property
     def ovs_ports(self):
         return self.network['ovs_ports']
 
@@ -213,6 +223,13 @@ class ConfigManager(object):
 
     def cleanup(self):
         shutil.rmtree(self.tempdir)
+
+    def __del__(self):
+        try:
+            self.cleanup()
+        except FileNotFoundError:
+            # If cleanup() was called before, there is nothing to delete
+            pass
 
     def _copy_file(self, src, dst):
         shutil.copy(src, dst)

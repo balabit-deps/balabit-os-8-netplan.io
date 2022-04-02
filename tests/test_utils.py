@@ -15,12 +15,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import io
 import os
+import sys
 import unittest
 import tempfile
 import glob
 import netifaces
 
+from contextlib import redirect_stdout
+from netplan.cli.core import Netplan
 import netplan.cli.utils as utils
 from unittest.mock import patch
 
@@ -68,6 +72,10 @@ printf '\\0' >> %(log)s
         with open(self.path, "a") as fp:
             fp.write("cat << EOF\n%s\nEOF" % output)
 
+    def touch(self, stamp_path):
+        with open(self.path, "a") as fp:
+            fp.write("touch %s\n" % stamp_path)
+
     def set_timeout(self, timeout_dsec=10):
         with open(self.path, "a") as fp:
             fp.write("""
@@ -87,6 +95,18 @@ fi
     def set_returncode(self, returncode):
         with open(self.path, "a") as fp:
             fp.write("exit %d" % returncode)
+
+
+def call_cli(args):
+    old_sys_argv = sys.argv
+    sys.argv = [old_sys_argv[0]] + args
+    f = io.StringIO()
+    try:
+        with redirect_stdout(f):
+            Netplan().main()
+            return f.getvalue()
+    finally:
+        sys.argv = old_sys_argv
 
 
 class TestUtils(unittest.TestCase):
@@ -158,6 +178,15 @@ class TestUtils(unittest.TestCase):
         iface = utils.find_matching_iface(DEVICES, match)
         self.assertEqual(iface, 'ens4')
 
+    @patch('netplan.cli.utils.get_interface_driver_name')
+    def test_find_matching_iface_name_and_drivers(self, gidn):
+        # we mock-out get_interface_driver_name to return useful values for the test
+        gidn.side_effect = lambda x: 'foo' if x == 'ens4' else 'bar'
+
+        match = {'name': 'ens?', 'driver': ['baz', 'f*', 'quux']}
+        iface = utils.find_matching_iface(DEVICES, match)
+        self.assertEqual(iface, 'ens4')
+
     @patch('netifaces.ifaddresses')
     def test_interface_macaddress(self, ifaddr):
         ifaddr.side_effect = lambda _: {netifaces.AF_LINK: [{'addr': '00:01:02:03:04:05'}]}
@@ -167,35 +196,6 @@ class TestUtils(unittest.TestCase):
     def test_interface_macaddress_empty(self, ifaddr):
         ifaddr.side_effect = lambda _: {}
         self.assertEqual(utils.get_interface_macaddress('eth42'), '')
-
-    def test_netplan_get_filename_by_id(self):
-        file_a = os.path.join(self.workdir.name, 'etc/netplan/a.yaml')
-        file_b = os.path.join(self.workdir.name, 'etc/netplan/b.yaml')
-        with open(file_a, 'w') as f:
-            f.write('network:\n  ethernets:\n    id_a:\n      dhcp4: true')
-        with open(file_b, 'w') as f:
-            f.write('network:\n  ethernets:\n    id_b:\n      dhcp4: true\n    id_a:\n      dhcp4: true')
-        # netdef:b can only be found in b.yaml
-        basename = os.path.basename(utils.netplan_get_filename_by_id('id_b', self.workdir.name))
-        self.assertEqual(basename, 'b.yaml')
-        # netdef:a is defined in a.yaml, overriden by b.yaml
-        basename = os.path.basename(utils.netplan_get_filename_by_id('id_a', self.workdir.name))
-        self.assertEqual(basename, 'b.yaml')
-
-    def test_netplan_get_filename_by_id_no_files(self):
-        self.assertIsNone(utils.netplan_get_filename_by_id('some-id', self.workdir.name))
-
-    def test_netplan_get_filename_by_id_invalid(self):
-        file = os.path.join(self.workdir.name, 'etc/netplan/a.yaml')
-        with open(file, 'w') as f:
-            f.write('''network:
-  tunnels:
-    id_a:
-      mode: sit
-      local: 0.0.0.0
-      remote: 0.0.0.0
-      key: 0.0.0.0''')
-        self.assertIsNone(utils.netplan_get_filename_by_id('some-id', self.workdir.name))
 
     def test_systemctl(self):
         self.mock_systemctl = MockCmd('systemctl')

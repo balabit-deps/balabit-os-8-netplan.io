@@ -15,7 +15,7 @@
 #include <systemd/sd-event.h>
 
 #include "_features.h"
-#include "util.h"
+#include "util-internal.h"
 
 typedef struct {
     sd_bus_slot *slot;
@@ -110,7 +110,11 @@ _try_accept(bool accept, sd_bus_message *m, NetplanData *d, sd_bus_error *ret_er
      * Check return code/errors. */
     kill(d->try_pid, signal);
     waitpid(d->try_pid, &status, 0);
+    #if GLIB_CHECK_VERSION (2, 70, 0)
+    g_spawn_check_wait_status(status, &error);
+    #else
     g_spawn_check_exit_status(status, &error);
+    #endif
     if (error != NULL)
         return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED, "netplan try failed: %s", error->message); // LCOV_EXCL_LINE
 
@@ -170,7 +174,7 @@ _clear_tmp_state(const char *config_id, NetplanData *d)
 {
     g_autofree gchar *rootdir = NULL;
     /* Remove tmp YAML files */
-    rootdir = g_strdup_printf("%s/netplan-config-%s", g_get_tmp_dir(), config_id);
+    rootdir = g_strdup_printf("%s/run/netplan/config-%s", NETPLAN_ROOT, config_id);
     unlink_glob(rootdir, "/{etc,run,lib}/netplan/*.yaml");
 
     /* Remove tmp state directories */
@@ -199,6 +203,30 @@ _clear_tmp_state(const char *config_id, NetplanData *d)
     return TRUE;
 }
 
+static int
+_backup_global_state(sd_bus_error *ret_error)
+{
+    int r = 0;
+    g_autofree gchar *path = NULL;
+    path = g_strdup_printf("%s/run/netplan/config-%s", NETPLAN_ROOT, NETPLAN_GLOBAL_CONFIG);
+    /* Create {etc,run,lib} subdirs with owner r/w permissions */
+    char *subdir = NULL;
+    for (int i = 0; i < 3; i++) {
+        subdir = g_strdup_printf("%s/%s/netplan", path, NETPLAN_SUBDIRS[i]);
+        r = g_mkdir_with_parents(subdir, 0700);
+        if (r < 0)
+            // LCOV_EXCL_START
+            return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED,
+                                    "Failed to create '%s': %s\n", subdir, strerror(errno));
+            // LCOV_EXCL_STOP
+        g_free(subdir);
+    }
+
+    /* Copy main *.yaml files from /{etc,run,lib}/netplan/ to GLOBAL backup dir */
+    _copy_yaml_state(NETPLAN_ROOT, path, ret_error);
+    return 0;
+}
+
 /**
  * io.netplan.Netplan methods
  */
@@ -209,6 +237,7 @@ method_apply(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
     g_autoptr(GError) err = NULL;
     g_autofree gchar *stdout = NULL;
     g_autofree gchar *stderr = NULL;
+    g_autofree gchar *state = NULL;
     gint exit_status = 0;
     NetplanData *d = userdata;
 
@@ -216,8 +245,9 @@ method_apply(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
      * Otherwise execute 'netplan apply' directly. */
     if (d->try_pid > 0)
         return _try_accept(TRUE, m, userdata, ret_error);
-
-    gchar *argv[] = {SBINDIR "/" "netplan", "apply", NULL};
+    if (d->config_id)
+        state = g_strdup_printf("--state=%s/run/netplan/config-%s", NETPLAN_ROOT, NETPLAN_GLOBAL_CONFIG);
+    gchar *argv[] = {SBINDIR "/" "netplan", "apply", state, NULL};
 
     // for tests only: allow changing what netplan to run
     if (getenv("DBUS_TEST_NETPLAN_CMD") != 0)
@@ -228,7 +258,11 @@ method_apply(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
     if (err != NULL)
         return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED,
                                  "cannot run netplan apply: %s", err->message);
+    #if GLIB_CHECK_VERSION (2, 70, 0)
+    g_spawn_check_wait_status(exit_status, &err);
+    #else
     g_spawn_check_exit_status(exit_status, &err);
+    #endif
     if (err != NULL)
        return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED,
                                 "netplan apply failed: %s\nstdout: '%s'\nstderr: '%s'",
@@ -257,7 +291,11 @@ method_generate(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
     if (err != NULL)
         return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED,
                                  "cannot run netplan generate: %s", err->message);
+    #if GLIB_CHECK_VERSION (2, 70, 0)
+    g_spawn_check_wait_status(exit_status, &err);
+    #else
     g_spawn_check_exit_status(exit_status, &err);
+    #endif
     if (err != NULL)
        return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED,
                                 "netplan generate failed: %s\nstdout: '%s'\nstderr: '%s'",
@@ -323,7 +361,7 @@ method_get(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
     gint exit_status = 0;
 
     if (d->config_id)
-        root_dir = g_strdup_printf("--root-dir=%s/netplan-config-%s", g_get_tmp_dir(), d->config_id);
+        root_dir = g_strdup_printf("--root-dir=%s/run/netplan/config-%s", NETPLAN_ROOT, d->config_id);
     gchar *argv[] = {SBINDIR "/" "netplan", "get", "all", root_dir, NULL};
 
     // for tests only: allow changing what netplan to run
@@ -334,7 +372,11 @@ method_get(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
     if (err != NULL)
         return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED, "cannot run netplan get: %s", err->message); // LCOV_EXCL_LINE
 
+    #if GLIB_CHECK_VERSION (2, 70, 0)
+    g_spawn_check_wait_status(exit_status, &err);
+    #else
     g_spawn_check_exit_status(exit_status, &err);
+    #endif
     if (err != NULL)
        return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED, "netplan get failed: %s\nstdout: '%s'\nstderr: '%s'", err->message, stdout, stderr); // LCOV_EXCL_LINE
 
@@ -366,7 +408,7 @@ method_set(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
     }
 
     if (d->config_id) {
-        root_dir = g_strdup_printf("--root-dir=%s/netplan-config-%s", g_get_tmp_dir(), d->config_id);
+        root_dir = g_strdup_printf("--root-dir=%s/run/netplan/config-%s", NETPLAN_ROOT, d->config_id);
         args[cur_arg] = root_dir;
         cur_arg++;
     }
@@ -380,7 +422,11 @@ method_set(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
     if (err != NULL)
         return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED, "cannot run netplan set %s: %s", config_delta, err->message); // LCOV_EXCL_LINE
 
+    #if GLIB_CHECK_VERSION (2, 70, 0)
+    g_spawn_check_wait_status(exit_status, &err);
+    #else
     g_spawn_check_exit_status(exit_status, &err);
+    #endif
     if (err != NULL)
        return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED, "netplan set failed: %s\nstdout: '%s'\nstderr: '%s'", err->message, stdout, stderr); // LCOV_EXCL_LINE
 
@@ -397,7 +443,7 @@ netplan_try_cancelled_cb(sd_event_source *es, const siginfo_t *si, void* userdat
         /* Delete GLOBAL state */
         unlink_glob(NETPLAN_ROOT, "/{etc,run,lib}/netplan/*.yaml");
         /* Restore GLOBAL backup config state to main rootdir */
-        state_dir = g_strdup_printf("%s/netplan-config-%s", g_get_tmp_dir(), NETPLAN_GLOBAL_CONFIG);
+        state_dir = g_strdup_printf("%s/run/netplan/config-%s", NETPLAN_ROOT, NETPLAN_GLOBAL_CONFIG);
         _copy_yaml_state(state_dir, NETPLAN_ROOT, NULL);
 
         /* Un-invalidate all other current config objects */
@@ -421,6 +467,9 @@ method_try(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
 {
     g_autoptr(GError) err = NULL;
     g_autofree gchar *timeout = NULL;
+    g_autofree gchar *state = NULL;
+    g_autofree gchar *netplan_try_stamp = NULL;
+    struct stat buf;
     gint child_stdin = -1; /* child process needs an input to function correctly */
     guint seconds = 0;
     int r = -1;
@@ -430,12 +479,17 @@ method_try(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
         return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED, "cannot extract timeout_seconds"); // LCOV_EXCL_LINE
     if (seconds > 0)
         timeout = g_strdup_printf("--timeout=%u", seconds);
-    gchar *argv[] = {SBINDIR "/" "netplan", "try", timeout, NULL};
+    if (d->config_id)
+        state = g_strdup_printf("--state=%s/run/netplan/config-%s", NETPLAN_ROOT, NETPLAN_GLOBAL_CONFIG);
+    gchar *argv[] = {SBINDIR "/" "netplan", "try", timeout, state, NULL};
 
     // for tests only: allow changing what netplan to run
     if (getenv("DBUS_TEST_NETPLAN_CMD") != 0)
        argv[0] = getenv("DBUS_TEST_NETPLAN_CMD");
 
+    /* Delete any left-over netplan-try.ready stamp file, if it exists */
+    netplan_try_stamp = g_build_path("/", NETPLAN_ROOT, "run", "netplan", "netplan-try.ready", NULL);
+    unlink(netplan_try_stamp);
     /* Launch 'netplan try' child process, lock 'try_pid' to real PID */
     g_spawn_async_with_pipes("/", argv, NULL,
                              G_SPAWN_DO_NOT_REAP_CHILD|G_SPAWN_STDOUT_TO_DEV_NULL,
@@ -456,6 +510,21 @@ method_try(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
         return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED,
                                  "cannot watch 'netplan try' child: %s", strerror(-r));
         // LCOV_EXCL_STOP
+
+    /* wait for the /run/netplan/netplan-try.ready stamp file to appear */
+    guint poll_timeout = 500;
+    if (seconds > 0 && seconds < 5)
+        poll_timeout = seconds * 100;
+    /* Timeout after up to 5 sec of waiting for the stamp file */
+    for (int i = 0; i < poll_timeout; i++) {
+        if (stat(netplan_try_stamp, &buf) == 0)
+            break;
+        usleep(1000 * 10);
+    }
+    if (stat(netplan_try_stamp, &buf) != 0) {
+       g_debug("cannot find %s stamp file", netplan_try_stamp);
+       return sd_bus_reply_method_return(m, "b", false);
+    }
 
     return sd_bus_reply_method_return(m, "b", true);
 }
@@ -482,15 +551,21 @@ method_config_apply(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
     d->config_dirty = g_strdup(d->config_id);
 
     if (d->try_pid < 0) {
+        r = _backup_global_state(ret_error);
+        if (r < 0)
+            return r; // LCOV_EXCL_LINE
+
         /* Delete GLOBAL state */
         unlink_glob(NETPLAN_ROOT, "/{etc,run,lib}/netplan/*.yaml");
         /* Copy current config state to GLOBAL */
-        state_dir = g_strdup_printf("%s/netplan-config-%s", g_get_tmp_dir(), d->config_id);
+        state_dir = g_strdup_printf("%s/run/netplan/config-%s", NETPLAN_ROOT, d->config_id);
         _copy_yaml_state(state_dir, NETPLAN_ROOT, ret_error);
         d->handler_id = g_strdup(d->config_id);
     }
 
     r = method_apply(m, d, ret_error);
+    /* Clear GLOBAL backup and config state */
+    _clear_tmp_state(NETPLAN_GLOBAL_CONFIG, d);
     _clear_tmp_state(d->config_id, d);
 
     /* unlock current config ID and handler ID */
@@ -535,7 +610,6 @@ static int
 method_config_try(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
 {
     NetplanData *d = userdata;
-    g_autofree gchar *path = NULL;
     g_autofree gchar *state_dir = NULL;
     const char *config_id = sd_bus_message_get_path(m) + 27;
     if (d->try_pid > 0)
@@ -551,29 +625,15 @@ method_config_try(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
     d->try_pid = G_MAXINT;
     d->config_id = config_id;
 
-    /* Backup GLOBAL state */
-    path = g_strdup_printf("%s/netplan-config-%s", g_get_tmp_dir(), NETPLAN_GLOBAL_CONFIG);
-    /* Create {etc,run,lib} subdirs with owner r/w permissions */
-    char *subdir = NULL;
-    for (int i = 0; i < 3; i++) {
-        subdir = g_strdup_printf("%s/%s/netplan", path, NETPLAN_SUBDIRS[i]);
-        r = g_mkdir_with_parents(subdir, 0700);
-        if (r < 0)
-            // LCOV_EXCL_START
-            return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED,
-                                    "Failed to create '%s': %s\n", subdir, strerror(errno));
-            // LCOV_EXCL_STOP
-        g_free(subdir);
-    }
-
-    /* Copy main *.yaml files from /{etc,run,lib}/netplan/ to GLOBAL backup dir */
-    _copy_yaml_state(NETPLAN_ROOT, path, ret_error);
+    r = _backup_global_state(ret_error);
+    if (r < 0)
+        return r; // LCOV_EXCL_LINE
 
     /* Clear main *.yaml files */
     unlink_glob(NETPLAN_ROOT, "/{etc,run,lib}/netplan/*.yaml");
 
     /* Copy current config *.yaml state to main rootdir (i.e. /etc/netplan/) */
-    state_dir = g_strdup_printf("%s/netplan-config-%s", g_get_tmp_dir(), d->config_id);
+    state_dir = g_strdup_printf("%s/run/netplan/config-%s", NETPLAN_ROOT, d->config_id);
     _copy_yaml_state(state_dir, NETPLAN_ROOT, ret_error);
 
     /* Exec try */
@@ -604,7 +664,7 @@ method_config_cancel(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
         /* Delete GLOBAL state */
         unlink_glob(NETPLAN_ROOT, "/{etc,run,lib}/netplan/*.yaml");
         /* Restore GLOBAL backup config state to main rootdir */
-        state_dir = g_strdup_printf("%s/netplan-config-%s", g_get_tmp_dir(), NETPLAN_GLOBAL_CONFIG);
+        state_dir = g_strdup_printf("%s/run/netplan/config-%s", NETPLAN_ROOT, NETPLAN_GLOBAL_CONFIG);
         _copy_yaml_state(state_dir, NETPLAN_ROOT, ret_error);
 
         /* Clear GLOBAL backup and config state */
@@ -641,15 +701,20 @@ method_config(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
     NetplanData *d = userdata;
     sd_bus_slot *slot = NULL;
     g_autoptr(GError) err = NULL;
-    g_autofree gchar *path = NULL;
+    g_autofree gchar *tmpl = NULL;
+    g_autofree gchar *dir = NULL;
+    gchar *path = NULL;
     int r = 0;
 
-    /* Create temp. directory, according to "netplan-config-XXXXXX" template */
-    path = g_dir_make_tmp("netplan-config-XXXXXX", &err);
-    if (err != NULL)
+    /* Create state directory, according to "run/netplan/config-XXXXXX" template */
+    tmpl = g_build_path("/", NETPLAN_ROOT, "run", "netplan", "config-XXXXXX", NULL);
+    dir = g_path_get_dirname(tmpl);
+    r = g_mkdir_with_parents(dir, 0700);
+    path = g_mkdtemp(tmpl); // returns pointer to tmpl (with modified string)
+    if (r < 0 || !path)
         // LCOV_EXCL_START
         return sd_bus_error_setf(ret_error, SD_BUS_ERROR_FAILED,
-                                 "Failed to create temp dir: %s\n", err->message);
+                                 "Failed to create temp dir: %s\n", strerror(errno));
         // LCOV_EXCL_STOP
 
     /* Extract the last 6 randomly generated chars (i.e. "XXXXXX" from template) */
