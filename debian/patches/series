@@ -6,3 +6,7 @@ autopkgtest-fixes.patch
 0006-cli-apply-give-some-extra-time-for-networkctl-reload.patch
 test-ethernets-stability.patch
 multi-driver-match-compat.patch
+0009-dbus-Remove-the-upper-limit-on-try-timeout-271.patch
+0010-nm-fix-rendering-of-password-for-unknown-passthrough.patch
+0003-Add-tristate-type-for-offload-options-LP-1956264-270.patch
+0004-tests-ethernets-fix-autopkgtest-with-alternating-def.patch

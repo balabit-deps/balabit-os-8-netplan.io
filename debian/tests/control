@@ -24,6 +24,7 @@ Depends: @,
   libnm0,
   python3-gi,
   gir1.2-nm-1.0,
+  ethtool,
 Restrictions: allow-stderr, needs-root, isolation-container
 Features: test-name=ethernets
 

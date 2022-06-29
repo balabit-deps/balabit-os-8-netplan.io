@@ -1,3 +1,16 @@
+netplan.io (0.104-0ubuntu2~20.04.2) focal; urgency=medium
+
+  * Cherry pick d/p/dbus-Remove-the-upper-limit-on-try-timeout.patch
+    (LP: #1967084)
+  * Cherry-pick fix for rendering WPA3 password (8934a1b), LP: #1975576
+    + d/p/0010-nm-fix-rendering-of-password-for-unknown-passthrough.patch
+  * Backport offloading tristate patches (LP: #1956264)
+    + d/p/0003-Add-tristate-type-for-offload-options-LP-1956264-270.patch
+    + d/p/0004-tests-ethernets-fix-autopkgtest-with-alternating-def.patch
+    + d/t/control: add 'ethtool' test-dep for link offloading tests
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Wed, 29 Jun 2022 17:54:23 +0200
+
 netplan.io (0.104-0ubuntu2~20.04.1) focal; urgency=medium
 
   * Backport netplan.io 0.104-0ubuntu2 to 20.04 (LP: #1964481)

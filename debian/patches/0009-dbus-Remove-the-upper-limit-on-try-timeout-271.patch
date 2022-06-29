@@ -1,0 +1,48 @@
+From: Simon Chopin <simon.chopin@canonical.com>
+Date: Mon, 11 Apr 2022 15:29:57 +0200
+Subject: dbus: Remove the upper limit on try timeout (#271)
+
+Also, increase the default to 10s.
+
+If the caller sees fit to specifiy a 30s timeout for their try call, it
+stands to reason to respect that decision, as they (probably) know
+better.
+
+This issue came up in the Core testsuite, where the netplan
+configuration step failed because `netplan try` took 6s, cf
+LP: #1967084. Their DBus call specifies a timeout of 300s, but the call
+failed after a "relatively short time", which was this internal timeout.
+
+Note that the mere fact that `netplan try` takes more than 5s on such a
+simple configuration is probably due to the following patch:
+
+https://git.launchpad.net/ubuntu/+source/netplan.io/tree/debian/patches/0006-cli-apply-give-some-extra-time-for-networkctl-reload.patch?h=applied/ubuntu/focal-updates
+
+Since the bridge is empty, it might be in a "configuring" state forever.
+
+Granted, that's not something one would do on production systems,
+however creating an empty bridge interface is routinely done in test
+suites, including our own.
+---
+ src/dbus.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/dbus.c b/src/dbus.c
+index 4d9b17a..2541039 100644
+--- a/src/dbus.c
++++ b/src/dbus.c
+@@ -512,10 +512,11 @@ method_try(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
+         // LCOV_EXCL_STOP
+ 
+     /* wait for the /run/netplan/netplan-try.ready stamp file to appear */
+-    guint poll_timeout = 500;
+-    if (seconds > 0 && seconds < 5)
++    guint poll_timeout = 1000;
++    /* Replace the default timeout with the one specified by the caller */
++    if (seconds > 0)
+         poll_timeout = seconds * 100;
+-    /* Timeout after up to 5 sec of waiting for the stamp file */
++    /* Timeout after up to 10 sec of waiting for the stamp file */
+     for (int i = 0; i < poll_timeout; i++) {
+         if (stat(netplan_try_stamp, &buf) == 0)
+             break;
