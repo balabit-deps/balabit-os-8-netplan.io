@@ -1,3 +1,11 @@
+netplan.io (0.104-0ubuntu2~20.04.4) focal; urgency=medium
+
+  * Cherry-pick upstream commit fc12872 (PR#336) to fix crash in 'snapd set'
+    (LP: #1959570)
+  * Add autopkgtest for LP#1959570
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Thu, 26 Oct 2023 15:59:19 +0200
+
 netplan.io (0.104-0ubuntu2~20.04.2) focal; urgency=medium
 
   * Cherry pick d/p/dbus-Remove-the-upper-limit-on-try-timeout.patch

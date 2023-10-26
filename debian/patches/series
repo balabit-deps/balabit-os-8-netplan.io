@@ -10,3 +10,5 @@ multi-driver-match-compat.patch
 0010-nm-fix-rendering-of-password-for-unknown-passthrough.patch
 0003-Add-tristate-type-for-offload-options-LP-1956264-270.patch
 0004-tests-ethernets-fix-autopkgtest-with-alternating-def.patch
+0013-Use-controlled-execution-environment-to-avoid-failur.patch
+0014-tests-Add-autopkgtest-for-LP-1959570.patch

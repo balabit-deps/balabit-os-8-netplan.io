@@ -1,0 +1,143 @@
+From: =?utf-8?q?Lukas_M=C3=A4rdian?= <slyon@ubuntu.com>
+Date: Mon, 3 Apr 2023 16:08:06 +0200
+Subject: Use controlled execution environment,
+ to avoid failure if PATH is unset (LP: #1959570) (#336)
+
+Use a controlled execution environment.
+This is to allow execution in constrained environments, like early boot or
+Ubuntu Core 20/22 where the PATH environment variable might not be set
+
+Also, handle nmcli's "NetworkManager not running" error gracefully.
+Considering /usr/bin/nmcli for normal NetworkManager and /snap/bin/nmcli -> /snap/bin/network-manager.nmcli for NetworkManager snap as valid implementations.
+
+COMMITS:
+* cli: use controlled execution environment
+
+This is to allow execution in constrained environments, like early boot or
+Ubuntu Core 20/22 where the PATH environment variable might not be set.
+
+E.g. for the 'nmcli' binary:
+It could be /usr/bin/nmcli for normal NetworkManager or
+/snap/bin/nmcli -> /snap/bin/network-manager.nmcli for NM snap
+
+* cli:status:ip: Introduce utils.nmcli_out()
+
+* cli:apply: Handle 'nmcli' NM not running gracefully
+
+Also, consider /usr/bin/nmcli and
+/snap/bin/nmcli -> /snap/bin/network-manager.nmcli as valid implementations
+of 'nmcli', so it can be exected in a minimal environment, without the PATH
+variable being set (e.g. early boot or Ubuntu Core 20/22).
+---
+ netplan/cli/commands/apply.py | 19 +++++++++++++------
+ netplan/cli/commands/ip.py    | 14 ++++----------
+ netplan/cli/core.py           |  6 ++++++
+ netplan/cli/utils.py          | 11 +++++++----
+ 4 files changed, 30 insertions(+), 20 deletions(-)
+
+diff --git a/netplan/cli/commands/apply.py b/netplan/cli/commands/apply.py
+index fd911a7..a3ec30d 100644
+--- a/netplan/cli/commands/apply.py
++++ b/netplan/cli/commands/apply.py
+@@ -284,14 +284,21 @@ class NetplanApply(utils.NetplanCommand):
+                 utils.ip_addr_flush(iface)
+             utils.systemctl_network_manager('start', sync=sync)
+             if sync:
+-                # wait up to 2 sec for 'STATE=connected (site/local-only)' or
+-                # 'STATE=connected' to appear in 'nmcli general' STATE
+-                env = dict(os.environ, LC_ALL='C')
++                # 'nmcli' could be /usr/bin/nmcli or
++                # /snap/bin/nmcli -> /snap/bin/network-manager.nmcli
+                 cmd = ['nmcli', 'general', 'status']
+-                for _ in range(20):
+-                    if b'\nconnected' in subprocess.check_output(cmd, env=env):
++                # wait a bit for 'connected (site/local-only)' or
++                # 'connected' to appear in 'nmcli general' STATE
++                for _ in range(10):
++                    out = subprocess.run(cmd, capture_output=True, universal_newlines=True)
++                    # Handle nmcli's "not running" return code (8) gracefully,
++                    # giving some more time for NetworkManager startup
++                    if out.returncode == 8:
++                        time.sleep(1)
++                        continue
++                    if '\nconnected' in str(out.stdout):
+                         break
+-                    time.sleep(0.1)
++                    time.sleep(0.5)
+ 
+     @staticmethod
+     def is_composite_member(composites, phy):
+diff --git a/netplan/cli/commands/ip.py b/netplan/cli/commands/ip.py
+index b7a7f29..9091422 100644
+--- a/netplan/cli/commands/ip.py
++++ b/netplan/cli/commands/ip.py
+@@ -93,18 +93,12 @@ class NetplanIpLeases(utils.NetplanCommand):
+             def lease_method_nm_connection():  # pragma: nocover (covered in autopkgtest)
+                 # FIXME: handle older versions of NM where 'nmcli dev show' doesn't exist
+                 try:
+-                    nmcli_dev_out = subprocess.Popen(['nmcli', 'dev', 'show', self.interface],
+-                                                     env={'LC_ALL': 'C'},
+-                                                     stdout=subprocess.PIPE)
+-                    for line in nmcli_dev_out.stdout:
+-                        line = line.decode('utf-8')
++                    nmcli_dev_out = utils.nmcli_out(['dev', 'show', self.interface])
++                    for line in nmcli_dev_out.splitlines():
+                         if 'GENERAL.CONNECTION' in line:
+                             conn_id = line.split(':')[1].rstrip().strip()
+-                            nmcli_con_out = subprocess.Popen(['nmcli', 'con', 'show', 'id', conn_id],
+-                                                             env={'LC_ALL': 'C'},
+-                                                             stdout=subprocess.PIPE)
+-                            for line in nmcli_con_out.stdout:
+-                                line = line.decode('utf-8')
++                            nmcli_con_out = utils.nmcli_out(['con', 'show', 'id', conn_id])
++                            for line in nmcli_con_out.splitlines():
+                                 if 'connection.uuid' in line:
+                                     return line.split(':')[1].rstrip().strip()
+                 except Exception as e:
+diff --git a/netplan/cli/core.py b/netplan/cli/core.py
+index 3d6c392..a493272 100644
+--- a/netplan/cli/core.py
++++ b/netplan/cli/core.py
+@@ -24,12 +24,18 @@ import os
+ import netplan.cli.utils as utils
+ 
+ 
++FALLBACK_PATH = '/usr/bin:/snap/bin'
++
++
+ class Netplan(utils.NetplanCommand):
+ 
+     def __init__(self):
+         super().__init__(command_id='',
+                          description='Network configuration in YAML',
+                          leaf=False)
++        os.environ.update({
++            'LC_ALL': 'C',
++            'PATH': os.getenv('PATH', FALLBACK_PATH)})
+ 
+     def parse_args(self):
+         import netplan.cli.commands
+diff --git a/netplan/cli/utils.py b/netplan/cli/utils.py
+index 4fb1dad..9573cd3 100644
+--- a/netplan/cli/utils.py
++++ b/netplan/cli/utils.py
+@@ -37,12 +37,15 @@ def is_nm_snap_enabled():
+ 
+ 
+ def nmcli(args):  # pragma: nocover (covered in autopkgtest)
+-    binary_name = 'nmcli'
++    # 'nmcli' could be /usr/bin/nmcli or /snap/bin/nmcli -> /snap/bin/network-manager.nmcli
++    # PATH is defined in cli/core.py
++    subprocess.check_call(['nmcli'] + args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+ 
+-    if is_nm_snap_enabled():
+-        binary_name = 'network-manager.nmcli'
+ 
+-    subprocess.check_call([binary_name] + args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
++def nmcli_out(args: list) -> str:  # pragma: nocover (covered in autopkgtest)
++    # 'nmcli' could be /usr/bin/nmcli or /snap/bin/nmcli -> /snap/bin/network-manager.nmcli
++    # PATH is defined in cli/core.py
++    return subprocess.check_output(['nmcli'] + args, universal_newlines=True)
+ 
+ 
+ def nm_running():  # pragma: nocover (covered in autopkgtest)
