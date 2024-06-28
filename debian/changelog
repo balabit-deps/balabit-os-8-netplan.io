@@ -1,3 +1,30 @@
+netplan.io (0.104-0ubuntu2~20.04.6) focal-security; urgency=medium
+
+  * SECURITY REGRESSION: failure on systems without dbus
+    - debian/netplan.io.postinst: Don't call the generator if no networkd
+      configuration file exists. (LP: #2071333) 
+
+ -- Sudhakar Verma <sudhakar.verma@canonical.com>  Fri, 28 Jun 2024 22:29:34 +0530
+
+netplan.io (0.104-0ubuntu2~20.04.5) focal-security; urgency=medium
+
+  * SECURITY UPDATE: weak permissions on secret files, command injection
+    - d/p/lp2065738/0015-libnetplan-use-more-restrictive-file-permissions.patch:
+      Use more restrictive file permissions to prevent unprivileged users to
+      read sensitive data from back end files (LP: #2065738, #1987842)
+    - CVE-2022-4968
+    - d/p/lp2066258/0016-libnetplan-escape-control-characters.patch:
+      Escape control characters in the parser and double quotes in backend files
+    - d/p/lp2066258/0017-libnetplan-escape-file-paths.patch:
+      Escape special characters in file paths
+    - d/p/lp2066258/0018-libnetplan-escape-semicolons-in-service-units.patch:
+      Escape isolated semicolons in systemd service units (LP: #2066258)
+  * debian/netplan.io.postinst: Add a postinst maintainer script to call the
+    generator. It's needed so the file permissions fixes will be applied
+    automatically, thanks to danilogondolfo 
+
+ -- Sudhakar Verma <sudhakar.verma@canonical.com>  Mon, 24 Jun 2024 22:03:31 +0530
+
 netplan.io (0.104-0ubuntu2~20.04.4) focal; urgency=medium
 
   * Cherry-pick upstream commit fc12872 (PR#336) to fix crash in 'snapd set'

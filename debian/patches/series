@@ -12,3 +12,7 @@ multi-driver-match-compat.patch
 0004-tests-ethernets-fix-autopkgtest-with-alternating-def.patch
 0013-Use-controlled-execution-environment-to-avoid-failur.patch
 0014-tests-Add-autopkgtest-for-LP-1959570.patch
+lp2065738/0015-libnetplan-use-more-restrictive-file-permissions.patch
+lp2066258/0016-libnetplan-escape-control-characters.patch
+lp2066258/0017-libnetplan-escape-file-paths.patch
+lp2066258/0018-libnetplan-escape-semicolons-in-service-units.patch

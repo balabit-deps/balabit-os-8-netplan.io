@@ -1,0 +1,161 @@
+From: Danilo Egea Gondolfo <danilogondolfo@gmail.com>
+Date: Thu, 30 May 2024 12:55:06 +0100
+Subject: libnetplan: escape semicolons in service units
+
+Semicolons separated from other words by a combination of spaces and/or
+tabs will be escaped.
+---
+ src/networkd.c          |  5 +++++
+ src/openvswitch.c       |  4 ++++
+ src/sriov.c             |  4 ++++
+ src/util-internal.h     |  3 +++
+ src/util.c              | 34 ++++++++++++++++++++++++++++++++++
+ tests/generator/base.py |  7 +++++++
+ tests/test_sriov.py     | 34 ++++++++++++++++++++++++++++++++++
+ 7 files changed, 91 insertions(+)
+
+--- netplan.io-0.104.orig/src/networkd.c
++++ netplan.io-0.104/src/networkd.c
+@@ -1018,6 +1018,11 @@ write_wpa_unit(const NetplanNetDefinitio
+     } else {
+         g_string_append(s, " -Dnl80211,wext\n");
+     }
++
++    g_autofree char* new_s = _netplan_scrub_systemd_unit_contents(s->str);
++    g_string_free(s, TRUE);
++    s = g_string_new(new_s);
++
+     orig_umask = umask(027);
+     g_string_free_to_file(s, rootdir, path, NULL);
+     umask(orig_umask);
+--- netplan.io-0.104.orig/src/openvswitch.c
++++ netplan.io-0.104/src/openvswitch.c
+@@ -65,6 +65,10 @@ write_ovs_systemd_unit(const char* id, c
+     g_string_append(s, "\n[Service]\nType=oneshot\n");
+     g_string_append(s, cmds->str);
+ 
++    g_autofree char* new_s = _netplan_scrub_systemd_unit_contents(s->str);
++    g_string_free(s, TRUE);
++    s = g_string_new(new_s);
++
+     orig_umask = umask(027);
+     g_string_free_to_file(s, rootdir, path, NULL);
+     umask(orig_umask);
+--- netplan.io-0.104.orig/src/sriov.c
++++ netplan.io-0.104/src/sriov.c
+@@ -49,6 +49,10 @@ write_sriov_rebind_systemd_unit(const GS
+     g_string_append(s, "\n[Service]\nType=oneshot\n");
+     g_string_append_printf(s, "ExecStart=" SBINDIR "/netplan rebind %s\n", pfs->str);
+ 
++    g_autofree char* new_s = _netplan_scrub_systemd_unit_contents(s->str);
++    g_string_free(s, TRUE);
++    s = g_string_new(new_s);
++
+     orig_umask = umask(027);
+     g_string_free_to_file(s, rootdir, path, NULL);
+     umask(orig_umask);
+--- netplan.io-0.104.orig/src/util-internal.h
++++ netplan.io-0.104/src/util-internal.h
+@@ -94,3 +94,6 @@ _netplan_set_file_owners(const char* roo
+ 
+ gchar*
+ _netplan_scrub_string(const char* content);
++
++char*
++_netplan_scrub_systemd_unit_contents(const char* content);
+--- netplan.io-0.104.orig/src/util.c
++++ netplan.io-0.104/src/util.c
+@@ -692,3 +692,37 @@ _netplan_scrub_string(const char* conten
+ 
+     return g_string_free(s, FALSE);
+ }
++
++static gboolean
++_is_space_or_tab(char c)
++{
++    return c == ' ' || c == '\t';
++}
++
++char*
++_netplan_scrub_systemd_unit_contents(const char* content)
++{
++    size_t content_len = strlen(content);
++    // Assume a few replacements will happen to reduce reallocation
++    GString* s = g_string_sized_new(content_len + 8);
++
++    // Append the first character of "content" to the result string
++    g_string_append_len(s, content, 1);
++
++    // Walk from the second element to the one before the last looking for isolated semicolons
++    // A semicolon is isolated if it's surrounded by either tabs or spaces
++    const char* p = content + 1;
++    while (p < (content + content_len - 1)) {
++        if (*p == ';' && _is_space_or_tab(*(p - 1)) && _is_space_or_tab(*(p + 1))) {
++            g_string_append_len(s, "\\;", 2);
++        } else {
++            g_string_append_len(s, p, 1);
++        }
++        p++;
++    }
++
++    // Append the last character of "content" to the result string
++    g_string_append_len(s, p, 1);
++
++    return g_string_free(s, FALSE);
++}
+--- netplan.io-0.104.orig/tests/generator/base.py
++++ netplan.io-0.104/tests/generator/base.py
+@@ -463,3 +463,10 @@ class TestBase(unittest.TestCase):
+         self.assertEqual(set(os.path.basename(file) for file in sriov_systemd_dir),
+                          {'netplan-sriov-' + f for f in file_contents_map})
+         self.assertEqual(set(os.listdir(self.workdir.name)) - {'lib'}, {'etc', 'run'})
++
++        for file in sriov_systemd_dir:
++            basename = os.path.basename(file)
++            with open(file, 'r') as f:
++                contents = f.read()
++                map_contents = file_contents_map.get(basename.replace('netplan-sriov-', ''))
++                self.assertEqual(map_contents, contents)
+--- netplan.io-0.104.orig/tests/test_sriov.py
++++ netplan.io-0.104/tests/test_sriov.py
+@@ -879,6 +879,40 @@ Type=oneshot
+ ExecStart=/usr/sbin/netplan rebind enblue engreen
+ '''})
+ 
++    def test_escaping_semicolons_from_unit_file(self):
++        ''' Check if semicolons and line breaks are properly escaped in the generated
++        systemd service unit.
++        '''
++        self.generate('''network:
++  version: 2
++  ethernets:
++    engreen:
++      embedded-switch-mode: switchdev
++      delay-virtual-functions-rebind: true
++    enblue:
++      match: {driver: dummy_driver}
++      set-name: ";en ; a\\t;\\tb ;\\tc\\t; d; \\n;\\nabc"
++      embedded-switch-mode: legacy
++      delay-virtual-functions-rebind: true
++      virtual-function-count: 4
++    sriov_vf0:
++      link: engreen''', skip_generated_yaml_validation=True)
++        self.assert_sriov({'rebind.service': '''[Unit]
++Description=(Re-)bind SR-IOV Virtual Functions to their driver
++After=network.target
++After=sys-subsystem-net-devices-;en.device
++After=sys-subsystem-net-devices-;.device
++After=sys-subsystem-net-devices-a\\t;\\tb.device
++After=sys-subsystem-net-devices-;\\tc\\t;.device
++After=sys-subsystem-net-devices-d;.device
++After=sys-subsystem-net-devices-\\n;\\nabc.device
++After=sys-subsystem-net-devices-engreen.device
++
++[Service]
++Type=oneshot
++ExecStart=/usr/sbin/netplan rebind ;en \\; a\\t;\\tb ;\\tc\\t; d; \\n;\\nabc engreen
++'''})
++
+     def test_rebind_not_delayed(self):
+         self.generate('''network:
+   version: 2
